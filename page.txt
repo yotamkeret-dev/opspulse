@@ -1,0 +1,46 @@
+'use client';
+import { useState } from 'react';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { activityByCategory, deployments, feed, highlights, kpis, logistics, procurement, supportByDept, trend } from './data/mock';
+
+const pages = ['Executive Dashboard', 'Logistics', 'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed'];
+
+function KPIGrid({ items }: { items: typeof kpis }) {
+  return <div className="grid kpis">{items.map((item) => <div className="card" key={item.label}><div className="kpi-label">{item.label}</div><div className="kpi-value">{item.value}</div><div className="kpi-note">{item.note}</div></div>)}</div>;
+}
+
+function Shell({ page, setPage, children }: { page: string; setPage: (p: string) => void; children: React.ReactNode }) {
+  return <div className="shell"><aside className="sidebar"><div className="logo">OpsPulse</div><div className="tagline">Visibility into Operations Impact</div><div className="nav">{pages.map((p) => <button key={p} className={p === page ? 'active' : ''} onClick={() => setPage(p)}>{p}</button>)}</div></aside><main className="main"><div className="topbar"><div><b>{page}</b><div className="small">Orca Operations Intelligence Platform</div></div><span className="badge">Week 52 · Live demo</span></div>{children}</main></div>;
+}
+
+function Executive() {
+  return <><section className="hero"><h1>Operations delivered measurable business impact this week.</h1><p>OpsPulse combines operational activity from Oracle, Salesforce and manual team inputs into one executive view of throughput, achievements and cross-functional contribution.</p></section><KPIGrid items={kpis} /><div className="grid two"><div className="card"><h2 className="section-title">Weekly Activity Trend</h2><ResponsiveContainer width="100%" height={280}><AreaChart data={trend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)"/><XAxis dataKey="week" stroke="#8fa3bb"/><YAxis stroke="#8fa3bb"/><Tooltip/><Area type="monotone" dataKey="activities" stroke="#7aa2ff" fill="#7aa2ff" fillOpacity={0.25}/></AreaChart></ResponsiveContainer></div><div className="card"><h2 className="section-title">Support Hours by Department</h2><ResponsiveContainer width="100%" height={280}><BarChart data={supportByDept} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)"/><XAxis type="number" stroke="#8fa3bb"/><YAxis type="category" dataKey="name" stroke="#8fa3bb"/><Tooltip/><Bar dataKey="hours" fill="#78efc0" radius={[0, 10, 10, 0]}/></BarChart></ResponsiveContainer></div></div></>;
+}
+
+function MetricPage({ title, intro, rows }: { title: string; intro: string; rows: any[] }) {
+  return <><section className="hero"><h1>{title}</h1><p>{intro}</p></section><div className="grid kpis">{rows.map(r => <div className="card" key={r.metric}><div className="kpi-label">{r.metric}</div><div className="kpi-value">{r.value}</div><div className="small">{r.detail}</div></div>)}</div><div className="card"><h2 className="section-title">Activity by Category</h2><ResponsiveContainer width="100%" height={310}><BarChart data={activityByCategory}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)"/><XAxis dataKey="name" stroke="#8fa3bb"/><YAxis stroke="#8fa3bb"/><Tooltip/><Bar dataKey="value" fill="#7aa2ff" radius={[10, 10, 0, 0]}/></BarChart></ResponsiveContainer></div></>;
+}
+
+function Support() {
+  return <><section className="hero"><h1>Cross Functional Support</h1><p>Operations acts as a force multiplier for R&D, Defence, Product, Finance and Customer Success. This view shows effort invested across the company.</p></section><div className="card"><table className="table"><thead><tr><th>Department</th><th>Support Hours</th><th>Activities</th><th>Primary Impact</th></tr></thead><tbody>{supportByDept.map((d, i) => <tr key={d.name}><td><b>{d.name}</b></td><td>{d.hours}h</td><td>{[18,12,9,7,6][i]}</td><td>{['Urgent builds, testing support','Project procurement and shipments','Operational enablement','Supplier payments','Customer coordination'][i]}</td></tr>)}</tbody></table></div></>;
+}
+
+function Highlights() {
+  return <><section className="hero"><h1>Weekly Highlights</h1><p>A leadership-ready narrative summary of the week: what moved, what was delivered, and where Operations created value.</p></section><div className="grid two"><div className="card highlight">{highlights.map(h => <div className="highlight-item" key={h.title}><span className="pill">{h.tag}</span><b>{h.title}</b><div className="small">{h.text}</div></div>)}</div><div className="card"><h2 className="section-title">Executive Summary</h2><p className="small">This week Operations delivered strong throughput across logistics, procurement, deployments and inventory. The team supported multiple strategic initiatives while maintaining shipment readiness and reducing cross-functional friction.</p></div></div></>;
+}
+
+function ActivityFeed() {
+  return <><section className="hero"><h1>Operations Activity Feed</h1><p>A timeline of major operational achievements and meaningful activities across the week.</p></section><div className="timeline">{feed.map(e => <div className="event" key={e.title}><div><span className="pill">{e.date}</span></div><div><span className="pill">{e.area}</span><h3>{e.title}</h3><div className="small">{e.detail}</div></div></div>)}</div></>;
+}
+
+export default function App() {
+  const [page, setPage] = useState('Executive Dashboard');
+  let content = <Executive />;
+  if (page === 'Logistics') content = <MetricPage title="Logistics Command Center" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={logistics} />;
+  if (page === 'Procurement') content = <MetricPage title="Procurement Impact" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={procurement} />;
+  if (page === 'Deployments & Installations') content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity from Salesforce and team inputs." rows={deployments} />;
+  if (page === 'Cross Functional Support') content = <Support />;
+  if (page === 'Weekly Highlights') content = <Highlights />;
+  if (page === 'Activity Feed') content = <ActivityFeed />;
+  return <Shell page={page} setPage={setPage}>{content}</Shell>;
+}
