@@ -89,6 +89,7 @@ function AddWeeklyActivity() {
 
   const [category, setCategory] = useState('Procurement');
   const [department, setDepartment] = useState('Operations');
+  const [employee, setEmployee] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [highlight, setHighlight] = useState(false);
@@ -101,6 +102,7 @@ function AddWeeklyActivity() {
 
     setActivities([
       {
+        employee,
         category,
         department,
         title,
@@ -109,6 +111,7 @@ function AddWeeklyActivity() {
       ...activities
     ]);
 
+    setEmployee('');
     setTitle('');
     setDescription('');
     setHighlight(false);
@@ -149,6 +152,11 @@ function AddWeeklyActivity() {
         </div>
 
         <div>
+          <div className="kpi-label">Employee Name</div>
+          <input className="input" value={employee} onChange={(e) => setEmployee(e.target.value)} placeholder="Enter employee name" />
+        </div>
+
+        <div>
           <div className="kpi-label">Activity Title</div>
           <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Example: Emergency R&D procurement completed" />
         </div>
@@ -173,6 +181,7 @@ function AddWeeklyActivity() {
       <table className="table">
         <thead>
           <tr>
+            <th>Employee</th>
             <th>Category</th>
             <th>Department</th>
             <th>Activity</th>
@@ -182,6 +191,7 @@ function AddWeeklyActivity() {
         <tbody>
           {activities.map((a, i) => (
             <tr key={i}>
+              <td>{a.employee || '-'}</td>
               <td>{a.category}</td>
               <td>{a.department}</td>
               <td><b>{a.title}</b></td>
