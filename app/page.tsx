@@ -87,16 +87,31 @@ function AddWeeklyActivity() {
     { category: 'Logistics', department: 'Operations', title: '4 systems released from BAZ', highlight: 'Yes' }
   ]);
 
-  const addDemoActivity = () => {
+  const [category, setCategory] = useState('Procurement');
+  const [department, setDepartment] = useState('Operations');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [highlight, setHighlight] = useState(false);
+
+  const saveActivity = () => {
+    if (!title.trim()) {
+      alert('Please enter an activity title');
+      return;
+    }
+
     setActivities([
       {
-        category: 'Cross Functional Support',
-        department: 'Defence',
-        title: 'Weekly operational support item captured',
-        highlight: 'No'
+        category,
+        department,
+        title,
+        highlight: highlight ? 'Yes' : 'No'
       },
       ...activities
     ]);
+
+    setTitle('');
+    setDescription('');
+    setHighlight(false);
   };
 
   return <>
@@ -111,7 +126,7 @@ function AddWeeklyActivity() {
       <div className="grid two">
         <div>
           <div className="kpi-label">Category</div>
-          <select className="input">
+          <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
             <option>Procurement</option>
             <option>Logistics</option>
             <option>Deployments & Installations</option>
@@ -123,7 +138,7 @@ function AddWeeklyActivity() {
 
         <div>
           <div className="kpi-label">Department Supported</div>
-          <select className="input">
+          <select className="input" value={department} onChange={(e) => setDepartment(e.target.value)}>
             <option>Operations</option>
             <option>R&D</option>
             <option>Defence</option>
@@ -135,22 +150,22 @@ function AddWeeklyActivity() {
 
         <div>
           <div className="kpi-label">Activity Title</div>
-          <input className="input" placeholder="Example: Emergency R&D procurement completed" />
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Example: Emergency R&D procurement completed" />
         </div>
       </div>
 
       <div style={{marginTop: 20}}>
         <div className="kpi-label">Short Description</div>
-        <textarea className="input" rows={5} placeholder="Describe what was completed and why it mattered." />
+        <textarea className="input" rows={5} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe what was completed and why it mattered." />
       </div>
 
       <div style={{marginTop: 20}} className="highlight-item">
         <label>
-          <input type="checkbox" /> Include in Weekly Highlights
+          <input type="checkbox" checked={highlight} onChange={(e) => setHighlight(e.target.checked)} /> Include in Weekly Highlights
         </label>
       </div>
 
-      <button className="save-button" onClick={addDemoActivity}>Save Activity</button>
+      <button className="save-button" onClick={saveActivity}>Save Activity</button>
     </div>
 
     <div className="card">
