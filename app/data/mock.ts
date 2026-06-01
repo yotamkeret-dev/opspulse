@@ -63,6 +63,16 @@ export const deployments = [
   { metric: 'Trainings Delivered', value: '8', detail: 'Internal and external onboarding' }
 ];
 
+export const teamPulseStatus = [
+  { name: 'Yotam Keret', submitted: true },
+  { name: 'Dan Cohen', submitted: true },
+  { name: 'Amit Levy', submitted: true },
+  { name: 'Noa Shaked', submitted: true },
+  { name: 'Eliav Mizrahi', submitted: false },
+  { name: 'Liora Ben David', submitted: false },
+  { name: 'Omer Shapiro', submitted: false },
+];
+
 export const feed = [
   { date: 'Mon', title: '4 systems released from BAZ', area: 'Logistics', detail: 'Systems packed and moved into shipment-ready status.' },
   { date: 'Tue', title: 'Emergency R&D procurement closed', area: 'Procurement', detail: 'Supplier sourced, PO created and ETA secured.' },

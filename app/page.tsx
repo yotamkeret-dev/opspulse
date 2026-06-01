@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { activityByCategory, deployments, feed, highlights, kpis, logistics, procurement, supportByDept, trend } from './data/mock';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, LabelList } from 'recharts';
+import { activityByCategory, deployments, feed, highlights, kpis, logistics, procurement, supportByDept, teamPulseStatus, trend } from './data/mock';
 
 const pages = ['Executive Dashboard', 'Logistics', 'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity'];
 
@@ -24,27 +24,29 @@ function Executive() {
 
     <div className="grid two">
       <div className="card">
-        <h2 className="section-title">Weekly Activity Trend</h2>
-        <ResponsiveContainer width="100%" height={280}>
-          <AreaChart data={trend}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)"/>
-            <XAxis dataKey="week" stroke="#8fa3bb"/>
-            <YAxis stroke="#8fa3bb"/>
-            <Tooltip/>
-            <Area type="monotone" dataKey="activities" stroke="#7aa2ff" fill="#7aa2ff" fillOpacity={0.25}/>
-          </AreaChart>
-        </ResponsiveContainer>
+        <h2 className="section-title">Team Tasks Updates</h2>
+        <div className="team-pulse-list">
+          {teamPulseStatus.filter(m => m.submitted).map(m => (
+            <div key={m.name} className="team-pulse-item">
+              <span className="pulse-check">✓</span>
+              <span className="pulse-name">{m.name}</span>
+              <span className="pill pill-green">Submitted</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="card">
         <h2 className="section-title">Support Hours by Department</h2>
         <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={supportByDept} layout="vertical">
+          <BarChart data={supportByDept} layout="vertical" margin={{ top: 5, right: 50, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)"/>
             <XAxis type="number" stroke="#8fa3bb"/>
             <YAxis type="category" dataKey="name" stroke="#8fa3bb"/>
             <Tooltip/>
-            <Bar dataKey="hours" fill="#78efc0" radius={[0, 10, 10, 0]}/>
+            <Bar dataKey="hours" fill="#78efc0" radius={[0, 10, 10, 0]}>
+              <LabelList dataKey="hours" position="right" style={{ fill: '#ffffff', fontWeight: 700 }} />
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -116,7 +118,15 @@ function AddWeeklyActivity() {
     setDescription('');
     setHighlight(false);
   };
-
+const topContributors = Object.entries(
+  activities.reduce((acc, activity) => {
+    const name = activity.employee || 'Unknown'
+    acc[name] = (acc[name] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+)
+.sort((a, b) => b[1] - a[1])
+.slice(0, 5)
   return <>
     <section className="hero">
       <h1>Add Weekly Activity</h1>
