@@ -83,8 +83,8 @@ function ActivityFeed() {
 
 function AddWeeklyActivity() {
   const [activities, setActivities] = useState([
-    { category: 'Procurement', department: 'R&D', title: 'Emergency R&D procurement completed', highlight: 'Yes' },
-    { category: 'Logistics', department: 'Operations', title: '4 systems released from BAZ', highlight: 'Yes' }
+    { employee: 'Ops Team', category: 'Procurement', department: 'R&D', title: 'Emergency R&D procurement completed', highlight: 'Yes' },
+    { employee: 'Ops Team', category: 'Logistics', department: 'Operations', title: '4 systems released from BAZ', highlight: 'Yes' }
   ]);
 
   const [category, setCategory] = useState('Procurement');
