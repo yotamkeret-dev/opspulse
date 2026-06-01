@@ -16,7 +16,7 @@ function Shell({ page, setPage, children }: { page: string; setPage: (p: string)
 function Executive() {
   return <>
     <section className="hero">
-      <h1>Operations delivered measurable business impact this week.</h1>
+      <h1>Ops Status</h1>
       <p>Operations supported 5 departments, advanced 6 strategic initiatives and delivered 148 completed activities across logistics, procurement, deployments and inventory.</p>
     </section>
 
