@@ -44,10 +44,7 @@ const STATUS_COLORS: Record<string, string> = {
   'in-transit': 'status-in-progress',
   'pending-approval': 'status-in-progress',
   pending: 'status-in-progress',
-  delayed: 'status-blocked',
   'customs-hold': 'status-blocked',
-  'parts-missing': 'status-blocked',
-  'carrier-delay': 'status-blocked',
 };
 
 function KPIDetailPanel({ kpi, period, onClose }: { kpi: KPIItem; period: Period; onClose: () => void }) {
