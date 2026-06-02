@@ -279,24 +279,122 @@ function MyTasks({ period }: { period: Period }) {
   );
 }
 
-function Executive({ period }: { period: Period }) {
-  const data = timeRangeData[period];
-  const [selectedKpi, setSelectedKpi] = useState<KPIItem | null>(null);
+function MemberTaskGroup({ title, tasks }: { title: string; tasks: Task[] }) {
+  if (tasks.length === 0) return null;
+  return (
+    <div className="member-task-group">
+      <div className="task-section-header">
+        <span className="task-section-title">{title}</span>
+        <span className="task-count">{tasks.length}</span>
+      </div>
+      <div className="task-list">
+        {tasks.map(t => (
+          <div key={t.id} className={`task-row task-row-${t.status}`}>
+            <div className="task-main">
+              <div className="task-title">{t.title}</div>
+              <div className="task-meta">
+                <span className="pill" style={{ fontSize: 11, padding: '2px 7px' }}>{t.category}</span>
+              </div>
+            </div>
+            <div className="task-attrs">
+              <span className={`priority-label priority-${t.priority}`}>
+                <span className="priority-dot" />
+                {t.priority}
+              </span>
+              <span className="small" style={{ whiteSpace: 'nowrap' }}>Due {t.dueDate}</span>
+              <span className="small" style={{ whiteSpace: 'nowrap', color: 'var(--color-muted)' }}>↻ {t.lastUpdated}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TeamMemberPanel({ memberName, period, onClose }: {
+  memberName: string;
+  period: Period;
+  onClose: () => void;
+}) {
+  // Derives directly from allTasks — no separate mock data.
+  // When period changes while the panel is open, tasks update automatically.
+  const tasks      = allTasks[period].filter(t => t.owner === memberName);
+  const overdue    = tasks.filter(t => t.status === 'overdue');
+  const inProgress = tasks.filter(t => t.status === 'in-progress');
+  const open       = tasks.filter(t => t.status === 'open');
+  const completed  = tasks.filter(t => t.status === 'completed');
+  const periodWord = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'quarter';
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   return (
     <>
-      {selectedKpi && <KPIDetailPanel kpi={selectedKpi} period={period} onClose={() => setSelectedKpi(null)} />}
-      <KPIGrid items={data.kpis} onKpiClick={setSelectedKpi} />
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{memberName}</h3>
+            <div className="small" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+              <span>{tasks.length} task{tasks.length !== 1 ? 's' : ''} · {timeRangeData[period].label}</span>
+              {overdue.length > 0 && (
+                <span className="pill pill-red">{overdue.length} overdue</span>
+              )}
+            </div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="panel-body">
+          {tasks.length === 0 ? (
+            <div className="panel-empty">
+              <div className="panel-empty-icon">📋</div>
+              <div>No updates for {memberName} this {periodWord}</div>
+            </div>
+          ) : (
+            <>
+              <MemberTaskGroup title="Overdue"     tasks={overdue} />
+              <MemberTaskGroup title="In Progress" tasks={inProgress} />
+              <MemberTaskGroup title="Open"        tasks={open} />
+              <MemberTaskGroup title="Completed"   tasks={completed} />
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Executive({ period }: { period: Period }) {
+  const data = timeRangeData[period];
+  const [selectedKpi, setSelectedKpi]       = useState<KPIItem | null>(null);
+  const [selectedMember, setSelectedMember] = useState<string | null>(null);
+
+  // Only one panel open at a time
+  const openKpi    = (kpi: KPIItem) => { setSelectedMember(null); setSelectedKpi(kpi); };
+  const openMember = (name: string) => { setSelectedKpi(null); setSelectedMember(name); };
+
+  return (
+    <>
+      {selectedKpi    && <KPIDetailPanel kpi={selectedKpi} period={period} onClose={() => setSelectedKpi(null)} />}
+      {selectedMember && <TeamMemberPanel memberName={selectedMember} period={period} onClose={() => setSelectedMember(null)} />}
+
+      <KPIGrid items={data.kpis} onKpiClick={openKpi} />
 
       <div className="grid two">
         <div className="card">
-          <h2 className="section-title">Team Tasks Updates</h2>
+          <h2 className="section-title">Team Last Updates</h2>
           <div className="team-pulse-list">
             {teamPulseStatus.filter(m => m.submitted).map(m => (
               <div key={m.name} className="team-pulse-item">
                 <span className="pulse-check">✓</span>
                 <span className="pulse-name">{m.name}</span>
                 <span className="small" style={{ color: 'var(--color-muted)' }}>{m.lastUpdated}</span>
-                <span className="pill pill-green">Submitted</span>
+                <button className="last-updates-btn" onClick={() => openMember(m.name)}>
+                  Last Updates ↗
+                </button>
               </div>
             ))}
           </div>

@@ -155,6 +155,10 @@ a { color: inherit; text-decoration: none; }
 .task-section-overdue { border-color: rgba(239, 68, 68, .22); background: rgba(239, 68, 68, .04); }
 .task-summary-overdue { border-color: rgba(239, 68, 68, .3); }
 .task-summary-open { border-color: rgba(91, 141, 238, .3); }
+.last-updates-btn { background: transparent; border: 1px solid rgba(91,141,238,.32); color: var(--color-accent); border-radius: 8px; padding: 4px 11px; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .15s, border-color .15s; white-space: nowrap; font-family: inherit; }
+.last-updates-btn:hover { background: rgba(91,141,238,.12); border-color: var(--color-accent); }
+.member-task-group { margin-bottom: 20px; }
+.member-task-group:last-child { margin-bottom: 0; }
 .nav-my-tasks { color: var(--color-completed) !important; }
 .nav-my-tasks.active { background: rgba(52, 211, 153, .12) !important; border-color: rgba(52, 211, 153, .28) !important; }
 
