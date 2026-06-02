@@ -509,3 +509,92 @@ export const kpiRecords: Record<string, Record<Period, KPIRecord[]>> = {
   },
 
 };
+
+// ---------------------------------------------------------------------------
+// My Tasks
+// ---------------------------------------------------------------------------
+
+export type Task = {
+  id: string;
+  title: string;
+  owner: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  status: 'open' | 'in-progress' | 'completed' | 'overdue';
+  dueDate: string;
+  lastUpdated: string;
+  category: string;
+  description?: string;
+};
+
+export const allTasks: Record<Period, Task[]> = {
+  weekly: [
+    // Yotam Keret
+    { id: 'TASK-W001', title: 'Resolve System 124 customs documentation', owner: 'Yotam Keret', priority: 'critical', status: 'overdue', dueDate: 'May 24', lastUpdated: '3d ago', category: 'Logistics', description: 'Incomplete export certificate blocking customs release for Horizon Defense shipment' },
+    { id: 'TASK-W002', title: 'Q2 logistics review with leadership', owner: 'Yotam Keret', priority: 'high', status: 'overdue', dueDate: 'May 26', lastUpdated: '2d ago', category: 'Operations', description: 'Weekly ops review — rescheduled, needs to happen before end of week' },
+    { id: 'TASK-W003', title: 'Approve PO-4573 – System 120 components', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'May 29', lastUpdated: '1d ago', category: 'Procurement', description: 'GlobalTech Supply — $34K, pending approval before assembly can begin' },
+    { id: 'TASK-W004', title: 'Follow up on Kappa Corp delay resolution', owner: 'Yotam Keret', priority: 'critical', status: 'open', dueDate: 'May 29', lastUpdated: '2d ago', category: 'Logistics', description: 'Supplier component missing — confirm alternative source ETA' },
+    { id: 'TASK-W005', title: 'BAZ capacity expansion – Phase 2 migration', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '1d ago', category: 'Projects', description: 'Stock migration to new racking — 60% complete, Phase 3 starts next week' },
+    { id: 'TASK-W006', title: 'Supplier payment batch – W22 sign-off', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '8h ago', category: 'Finance', description: '$284K payment batch — 6 of 8 invoices approved, 2 pending Finance review' },
+    { id: 'TASK-W007', title: 'System 118 shipment confirmed – Frontier Defense', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 27', lastUpdated: '1d ago', category: 'Logistics' },
+    { id: 'TASK-W008', title: 'Defence urgent shipment preparation', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 26', lastUpdated: '1d ago', category: 'Logistics' },
+    { id: 'TASK-W009', title: 'Emergency R&D component procurement', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 27', lastUpdated: '14h ago', category: 'Procurement' },
+    { id: 'TASK-W010', title: 'Q2 inventory accuracy check', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'May 25', lastUpdated: '2d ago', category: 'Inventory' },
+    // Dan Cohen
+    { id: 'TASK-W011', title: 'Customs follow-up – System 124 docs', owner: 'Dan Cohen', priority: 'critical', status: 'in-progress', dueDate: 'May 29', lastUpdated: '3d ago', category: 'Logistics' },
+    { id: 'TASK-W012', title: 'Approve spare parts kit – Vanguard Tech', owner: 'Dan Cohen', priority: 'medium', status: 'open', dueDate: 'May 30', lastUpdated: '18h ago', category: 'Procurement' },
+    { id: 'TASK-W013', title: 'PO-4572 expedite – Pacific Parts Direct', owner: 'Dan Cohen', priority: 'high', status: 'completed', dueDate: 'May 27', lastUpdated: '18h ago', category: 'Procurement' },
+    // Amit Levy
+    { id: 'TASK-W014', title: 'MSC deployment sign-off', owner: 'Amit Levy', priority: 'high', status: 'completed', dueDate: 'May 27', lastUpdated: '20h ago', category: 'Deployments' },
+    { id: 'TASK-W015', title: 'Support hours report – W22', owner: 'Amit Levy', priority: 'medium', status: 'open', dueDate: 'May 30', lastUpdated: '1d ago', category: 'Operations' },
+    // Noa Shaked
+    { id: 'TASK-W016', title: 'BAZ inventory reconciliation', owner: 'Noa Shaked', priority: 'medium', status: 'completed', dueDate: 'May 25', lastUpdated: '2d ago', category: 'Inventory' },
+    { id: 'TASK-W017', title: 'Zenith Site C – installation documentation', owner: 'Noa Shaked', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '20h ago', category: 'Deployments' },
+    // Eliav Mizrahi
+    { id: 'TASK-W018', title: 'Frontier Site Alpha – installation report', owner: 'Eliav Mizrahi', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '1d ago', category: 'Deployments' },
+  ],
+
+  monthly: [
+    // Yotam Keret
+    { id: 'TASK-M001', title: 'Monthly supplier payment cycle – May', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 26', lastUpdated: '1d ago', category: 'Finance' },
+    { id: 'TASK-M002', title: 'BAZ capacity expansion – Phase 2', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '1d ago', category: 'Projects', description: 'Phase 2 of 3 — 60% complete, Phase 3 scoping next week' },
+    { id: 'TASK-M003', title: 'Inventory system upgrade – UAT sign-off', owner: 'Yotam Keret', priority: 'critical', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '18h ago', category: 'Projects', description: 'UAT in progress — 3 critical bugs resolved, 2 remaining' },
+    { id: 'TASK-M004', title: 'Resolve System 124 customs documentation', owner: 'Yotam Keret', priority: 'critical', status: 'overdue', dueDate: 'May 24', lastUpdated: '3d ago', category: 'Logistics' },
+    { id: 'TASK-M005', title: 'Q2 logistics review with leadership', owner: 'Yotam Keret', priority: 'high', status: 'overdue', dueDate: 'May 26', lastUpdated: '2d ago', category: 'Operations' },
+    { id: 'TASK-M006', title: 'Approve PO-4573 – System 120 components', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'May 29', lastUpdated: '1d ago', category: 'Procurement' },
+    { id: 'TASK-M007', title: 'Follow up on Kappa Corp delay', owner: 'Yotam Keret', priority: 'critical', status: 'open', dueDate: 'May 29', lastUpdated: '2d ago', category: 'Logistics' },
+    { id: 'TASK-M008', title: 'New supplier onboarding – legal approval', owner: 'Yotam Keret', priority: 'medium', status: 'open', dueDate: 'Jun 15', lastUpdated: '3d ago', category: 'Procurement' },
+    { id: 'TASK-M009', title: 'Emergency R&D component procurement', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 27', lastUpdated: '14h ago', category: 'Procurement' },
+    { id: 'TASK-M010', title: 'Frontier Defense – 12-system batch shipped', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 5', lastUpdated: '3w ago', category: 'Logistics' },
+    { id: 'TASK-M011', title: 'Customs backlog clearance – 8 cases', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 19', lastUpdated: '1w ago', category: 'Logistics' },
+    { id: 'TASK-M012', title: 'Q2 inventory close – accuracy audit', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'Jun 1', lastUpdated: '12h ago', category: 'Inventory' },
+    // Other owners
+    { id: 'TASK-M013', title: 'Oracle accuracy project', owner: 'Dan Cohen', priority: 'high', status: 'completed', dueDate: 'May 20', lastUpdated: '1w ago', category: 'Inventory' },
+    { id: 'TASK-M014', title: 'MSC full deployment sign-off', owner: 'Amit Levy', priority: 'high', status: 'completed', dueDate: 'May 14', lastUpdated: '2w ago', category: 'Deployments' },
+    { id: 'TASK-M015', title: 'R&D monthly support coordination', owner: 'Noa Shaked', priority: 'medium', status: 'completed', dueDate: 'May 30', lastUpdated: '1d ago', category: 'Support' },
+    { id: 'TASK-M016', title: 'Oracle–SAP data mapping session', owner: 'Dan Cohen', priority: 'high', status: 'in-progress', dueDate: 'Jun 30', lastUpdated: '2d ago', category: 'Projects' },
+    { id: 'TASK-M017', title: 'Zenith Site C deployment docs', owner: 'Noa Shaked', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '20h ago', category: 'Deployments' },
+  ],
+
+  quarterly: [
+    // Yotam Keret
+    { id: 'TASK-Q001', title: 'BAZ capacity expansion – full delivery', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '1d ago', category: 'Projects', description: 'Phase 2 of 3 complete — Phase 3 starts Jun 2' },
+    { id: 'TASK-Q002', title: 'Inventory system upgrade – production release', owner: 'Yotam Keret', priority: 'critical', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '18h ago', category: 'Projects', description: 'UAT in progress — release gate review Jun 15' },
+    { id: 'TASK-Q003', title: 'Regional deployment plan – Q3 handoff', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'Jun 25', lastUpdated: '2d ago', category: 'Projects' },
+    { id: 'TASK-Q004', title: 'Q2 ops review presentation', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'Jun 30', lastUpdated: '1d ago', category: 'Operations' },
+    { id: 'TASK-Q005', title: 'Resolve System 124 customs documentation', owner: 'Yotam Keret', priority: 'critical', status: 'overdue', dueDate: 'May 24', lastUpdated: '3d ago', category: 'Logistics' },
+    { id: 'TASK-Q006', title: 'Q2 logistics review with leadership', owner: 'Yotam Keret', priority: 'high', status: 'overdue', dueDate: 'May 26', lastUpdated: '2d ago', category: 'Operations' },
+    { id: 'TASK-Q007', title: 'Q2 supplier renegotiation – 3 contracts', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'Apr 15', lastUpdated: '6w ago', category: 'Procurement' },
+    { id: 'TASK-Q008', title: 'BAZ safety audit and certification', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'Apr 22', lastUpdated: '5w ago', category: 'Operations' },
+    { id: 'TASK-Q009', title: 'Enterprise batch shipment – 28 units', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'Apr 18', lastUpdated: '7w ago', category: 'Logistics' },
+    { id: 'TASK-Q010', title: 'Q2 inventory accuracy close', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'Jun 1', lastUpdated: '12h ago', category: 'Inventory' },
+    { id: 'TASK-Q011', title: 'Emergency R&D procurement programme', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 27', lastUpdated: '14h ago', category: 'Procurement' },
+    { id: 'TASK-Q012', title: 'Customs backlog clearance – Q2', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 19', lastUpdated: '1w ago', category: 'Logistics' },
+    // Other owners
+    { id: 'TASK-Q013', title: 'Oracle–SAP integration pilot', owner: 'Dan Cohen', priority: 'high', status: 'in-progress', dueDate: 'Jun 30', lastUpdated: '2d ago', category: 'Projects' },
+    { id: 'TASK-Q014', title: 'New supplier onboarding – 4 vendors', owner: 'Amit Levy', priority: 'medium', status: 'in-progress', dueDate: 'Jun 15', lastUpdated: '3d ago', category: 'Procurement' },
+    { id: 'TASK-Q015', title: 'Customer portal – ops module spec', owner: 'Noa Shaked', priority: 'high', status: 'in-progress', dueDate: 'Jun 30', lastUpdated: '1d ago', category: 'Projects' },
+    { id: 'TASK-Q016', title: 'Q2 cross-functional support review', owner: 'Eliav Mizrahi', priority: 'medium', status: 'open', dueDate: 'Jun 25', lastUpdated: '4d ago', category: 'Support' },
+    { id: 'TASK-Q017', title: 'Q1 ERP data cleanup', owner: 'Dan Cohen', priority: 'medium', status: 'completed', dueDate: 'Mar 31', lastUpdated: '9w ago', category: 'Projects' },
+    { id: 'TASK-Q018', title: 'BAZ safety audit', owner: 'Noa Shaked', priority: 'medium', status: 'completed', dueDate: 'Apr 22', lastUpdated: '5w ago', category: 'Operations' },
+  ],
+};

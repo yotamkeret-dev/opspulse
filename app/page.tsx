@@ -1,9 +1,15 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { KPIRecord, Period, kpiRecords, teamPulseStatus, timeRangeData } from './data/mock';
+import { KPIRecord, Period, Task, allTasks, kpiRecords, teamPulseStatus, timeRangeData } from './data/mock';
 
-const pages = ['Executive Dashboard', 'Logistics', 'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity'];
+const pages = ['Executive Dashboard', 'My Tasks', 'Logistics', 'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity'];
+
+// Auth-ready: replace with session user once authentication is added.
+// Next-Auth:  const CURRENT_USER = useSession().data?.user?.name ?? '';
+// Firebase:   const CURRENT_USER = useAuth().currentUser?.displayName ?? '';
+// Custom JWT: const CURRENT_USER = useUser().profile.fullName;
+const CURRENT_USER = 'Yotam Keret';
 
 type KPIItem = { label: string; value: string; note: string; priority: number };
 
@@ -147,7 +153,11 @@ function Shell({ page, setPage, period, setPeriod, children }: {
         <div className="tagline">Orca Operations Platform</div>
         <div className="nav">
           {pages.map((p) => (
-            <button key={p} className={p === page ? 'active' : ''} onClick={() => setPage(p)}>{p}</button>
+            <button
+              key={p}
+              className={[p === page ? 'active' : '', p === 'My Tasks' ? 'nav-my-tasks' : ''].filter(Boolean).join(' ')}
+              onClick={() => setPage(p)}
+            >{p}</button>
           ))}
         </div>
       </aside>
@@ -165,6 +175,107 @@ function Shell({ page, setPage, period, setPeriod, children }: {
         {children}
       </main>
     </div>
+  );
+}
+
+function TaskRow({ task }: { task: Task }) {
+  return (
+    <div className={`task-row task-row-${task.status}`}>
+      <div className="task-main">
+        <div className="task-title">{task.title}</div>
+        <div className="task-meta">
+          <span className="pill" style={{ fontSize: 11, padding: '2px 7px' }}>{task.category}</span>
+          {task.description && <span className="small">{task.description}</span>}
+        </div>
+      </div>
+      <div className="task-attrs">
+        <span className={`priority-label priority-${task.priority}`}>
+          <span className="priority-dot" />
+          {task.priority}
+        </span>
+        <span className="small" style={{ whiteSpace: 'nowrap' }}>Due {task.dueDate}</span>
+        <span className="small" style={{ whiteSpace: 'nowrap', color: 'var(--color-muted)' }}>↻ {task.lastUpdated}</span>
+      </div>
+    </div>
+  );
+}
+
+function TaskSection({ title, tasks, emptyLabel, variant }: { title: string; tasks: Task[]; emptyLabel: string; variant: string }) {
+  return (
+    <div className={`card task-section${variant === 'overdue' ? ' task-section-overdue' : ''}`}>
+      <div className="task-section-header">
+        <span className="task-section-title">{title}</span>
+        {tasks.length > 0 && <span className="task-count">{tasks.length}</span>}
+      </div>
+      {tasks.length === 0
+        ? <div className="task-empty">{emptyLabel}</div>
+        : <div className="task-list">{tasks.map(t => <TaskRow key={t.id} task={t} />)}</div>
+      }
+    </div>
+  );
+}
+
+function MyTasks({ period }: { period: Period }) {
+  // Filter to current user — swap CURRENT_USER for auth session when authentication is added.
+  const userTasks = allTasks[period].filter(t => t.owner === CURRENT_USER);
+  const overdue    = userTasks.filter(t => t.status === 'overdue');
+  const open       = userTasks.filter(t => t.status === 'open');
+  const inProgress = userTasks.filter(t => t.status === 'in-progress');
+  const completed  = userTasks.filter(t => t.status === 'completed');
+  const periodWord = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'quarter';
+
+  return (
+    <>
+      <div className="page-header">
+        <h2>My Tasks</h2>
+        <div className="small">{CURRENT_USER} · {timeRangeData[period].label}</div>
+      </div>
+
+      <div className="grid kpis">
+        <div className={`card kpi-p2${overdue.length > 0 ? ' task-summary-overdue card-alert' : ''}`}>
+          <div className="kpi-label">Overdue</div>
+          <div className="kpi-value">{overdue.length}</div>
+          <div className="kpi-note">{overdue.length > 0 ? 'Needs immediate attention' : 'Nothing overdue'}</div>
+        </div>
+        <div className="card kpi-p2 task-summary-open">
+          <div className="kpi-label">Open</div>
+          <div className="kpi-value" style={{ color: 'var(--color-accent)' }}>{open.length}</div>
+          <div className="kpi-note">Not yet started</div>
+        </div>
+        <div className="card kpi-p2">
+          <div className="kpi-label">In Progress</div>
+          <div className="kpi-value" style={{ color: 'var(--color-warning)' }}>{inProgress.length}</div>
+          <div className="kpi-note">Currently active</div>
+        </div>
+        <div className="card kpi-p3">
+          <div className="kpi-label">Completed</div>
+          <div className="kpi-value">{completed.length}</div>
+          <div className="kpi-note">This {periodWord}</div>
+        </div>
+      </div>
+
+      {overdue.length > 0 && (
+        <TaskSection title="Overdue" tasks={overdue} emptyLabel="" variant="overdue" />
+      )}
+      <TaskSection
+        title="Open"
+        tasks={open}
+        emptyLabel={`No open tasks this ${periodWord}`}
+        variant="open"
+      />
+      <TaskSection
+        title="In Progress"
+        tasks={inProgress}
+        emptyLabel="No tasks currently in progress"
+        variant="in-progress"
+      />
+      <TaskSection
+        title="Completed"
+        tasks={completed}
+        emptyLabel={`No completed tasks this ${periodWord}`}
+        variant="completed"
+      />
+    </>
   );
 }
 
@@ -425,6 +536,7 @@ export default function App() {
   const data = timeRangeData[period];
 
   let content = <Executive period={period} />;
+  if (page === 'My Tasks') content = <MyTasks period={period} />;
   if (page === 'Logistics') content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
   if (page === 'Procurement') content = <MetricPage title="Procurement" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={data.procurement} />;
   if (page === 'Deployments & Installations') content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity." rows={data.deployments} />;
