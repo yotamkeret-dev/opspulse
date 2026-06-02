@@ -1,29 +1,62 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { KPIRecord, Period, Task, allTasks, kpiRecords, teamPulseStatus, timeRangeData } from './data/mock';
+import {
+  KPIRecord, Period, SupportLog, TeamMember,
+  filterLogsByPeriod, kpiRecords, seedSupportLogs,
+  teamMembers, teamPulseStatus, timeRangeData,
+} from './data/mock';
 
-const pages = ['Executive Dashboard', 'My Tasks', 'Logistics', 'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity'];
-
-// Auth-ready: replace with session user once authentication is added.
-// Next-Auth:  const CURRENT_USER = useSession().data?.user?.name ?? '';
-// Firebase:   const CURRENT_USER = useAuth().currentUser?.displayName ?? '';
-// Custom JWT: const CURRENT_USER = useUser().profile.fullName;
-const CURRENT_USER = 'Yotam Keret';
+const pages = [
+  'Executive Dashboard', 'Team Contributions', 'Logistics', 'Procurement',
+  'Deployments & Installations', 'Cross Functional Support',
+  'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity',
+];
 
 type KPIItem = { label: string; value: string; note: string; priority: number };
+
+// Maps a YYYY-MM-DD date string to the nearest week tag used in PERIOD_WEEKS
+function getWeekTag(dateStr: string): string {
+  if (!dateStr) return 'W22';
+  const d = new Date(dateStr);
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  if (m >= 6) return 'W22';
+  if (m === 5) {
+    if (day >= 26) return 'W22';
+    if (day >= 19) return 'W21';
+    if (day >= 12) return 'W20';
+    if (day >= 5)  return 'W19';
+    return 'W18';
+  }
+  if (m === 4) {
+    if (day >= 21) return 'W17';
+    if (day >= 14) return 'W16';
+    if (day >= 7)  return 'W15';
+    return 'W14';
+  }
+  return 'W13';
+}
+
+// Derive support chart data from logs
+function buildSupportByDept(logs: SupportLog[]): { name: string; hours: number }[] {
+  const map: Record<string, number> = {};
+  logs.forEach(l => { map[l.department] = (map[l.department] || 0) + l.hours; });
+  return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, hours]) => ({ name, hours }));
+}
+
+// ─── Base components ───────────────────────────────────────────────────────
 
 function KPIGrid({ items, onKpiClick }: { items: KPIItem[]; onKpiClick: (item: KPIItem) => void }) {
   return (
     <div className="grid kpis">
-      {items.map((item) => (
+      {items.map(item => (
         <div
           className={`card kpi-p${item.priority} kpi-clickable`}
           key={item.label}
           onClick={() => onKpiClick(item)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => e.key === 'Enter' && onKpiClick(item)}
+          role="button" tabIndex={0}
+          onKeyDown={e => e.key === 'Enter' && onKpiClick(item)}
         >
           <div className="kpi-label">{item.label}</div>
           <div className="kpi-value">{item.value}</div>
@@ -31,96 +64,6 @@ function KPIGrid({ items, onKpiClick }: { items: KPIItem[]; onKpiClick: (item: K
         </div>
       ))}
     </div>
-  );
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  delivered: 'status-completed',
-  completed: 'status-completed',
-  paid: 'status-completed',
-  resolved: 'status-completed',
-  approved: 'status-completed',
-  'in-progress': 'status-in-progress',
-  'in-transit': 'status-in-progress',
-  'pending-approval': 'status-in-progress',
-  pending: 'status-in-progress',
-  'customs-hold': 'status-blocked',
-};
-
-function KPIDetailPanel({ kpi, period, onClose }: { kpi: KPIItem; period: Period; onClose: () => void }) {
-  const records: KPIRecord[] = kpiRecords[kpi.label]?.[period] ?? [];
-  const periodLabel = timeRangeData[period].label;
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  const counterpartyHeader = records[0]?.counterpartyType ?? 'Counterparty';
-
-  return (
-    <>
-      <div className="panel-overlay" onClick={onClose} />
-      <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="panel-header">
-          <div>
-            <h3>{kpi.label}</h3>
-            <div className="small">{records.length} record{records.length !== 1 ? 's' : ''} · {periodLabel}</div>
-          </div>
-          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-        <div className="panel-body">
-          {records.length === 0 ? (
-            <div className="panel-empty">
-              <div className="panel-empty-icon">📋</div>
-              <div>No records for this period</div>
-            </div>
-          ) : (
-            <table className="record-table">
-              <thead>
-                <tr>
-                  <th>Ref</th>
-                  <th>Name</th>
-                  {records.some(r => r.counterparty) && <th>{counterpartyHeader}</th>}
-                  <th>Owner</th>
-                  <th>Status</th>
-                  <th>Priority</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {records.map((r) => (
-                  <tr key={r.id}>
-                    <td><span className="rec-id">{r.id}</span></td>
-                    <td>
-                      <div className="rec-name">{r.name}</div>
-                      {r.notes && <div className="rec-notes">{r.notes}</div>}
-                    </td>
-                    {records.some(rec => rec.counterparty) && (
-                      <td><span className="rec-counterparty">{r.counterparty ?? '—'}</span></td>
-                    )}
-                    <td>{r.owner}</td>
-                    <td>
-                      <span className={`status-badge ${STATUS_COLORS[r.status] ?? 'status-in-progress'}`}>
-                        {r.status.replace(/-/g, ' ')}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`priority-label priority-${r.priority}`}>
-                        <span className="priority-dot" />
-                        {r.priority}
-                      </span>
-                    </td>
-                    <td><span className="small">{r.date}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </>
   );
 }
 
@@ -137,10 +80,8 @@ function TimeFilter({ period, setPeriod }: { period: Period; setPeriod: (p: Peri
 }
 
 function Shell({ page, setPage, period, setPeriod, children }: {
-  page: string;
-  setPage: (p: string) => void;
-  period: Period;
-  setPeriod: (p: Period) => void;
+  page: string; setPage: (p: string) => void;
+  period: Period; setPeriod: (p: Period) => void;
   children: React.ReactNode;
 }) {
   return (
@@ -149,10 +90,10 @@ function Shell({ page, setPage, period, setPeriod, children }: {
         <div className="logo">OpsPulse</div>
         <div className="tagline">Orca Operations Platform</div>
         <div className="nav">
-          {pages.map((p) => (
+          {pages.map(p => (
             <button
               key={p}
-              className={[p === page ? 'active' : '', p === 'My Tasks' ? 'nav-my-tasks' : ''].filter(Boolean).join(' ')}
+              className={[p === page ? 'active' : '', p === 'Team Contributions' ? 'nav-contrib' : ''].filter(Boolean).join(' ')}
               onClick={() => setPage(p)}
             >{p}</button>
           ))}
@@ -175,188 +116,93 @@ function Shell({ page, setPage, period, setPeriod, children }: {
   );
 }
 
-function TaskRow({ task }: { task: Task }) {
-  return (
-    <div className={`task-row task-row-${task.status}`}>
-      <div className="task-main">
-        <div className="task-title">{task.title}</div>
-        <div className="task-meta">
-          <span className="pill" style={{ fontSize: 11, padding: '2px 7px' }}>{task.category}</span>
-          {task.description && <span className="small">{task.description}</span>}
-        </div>
-      </div>
-      <div className="task-attrs">
-        <span className={`priority-label priority-${task.priority}`}>
-          <span className="priority-dot" />
-          {task.priority}
-        </span>
-        <span className="small" style={{ whiteSpace: 'nowrap' }}>Due {task.dueDate}</span>
-        <span className="small" style={{ whiteSpace: 'nowrap', color: 'var(--color-muted)' }}>↻ {task.lastUpdated}</span>
-      </div>
-    </div>
-  );
-}
+// ─── KPI Detail Panel ──────────────────────────────────────────────────────
 
-function TaskSection({ title, tasks, emptyLabel, variant }: { title: string; tasks: Task[]; emptyLabel: string; variant: string }) {
-  return (
-    <div className={`card task-section${variant === 'overdue' ? ' task-section-overdue' : ''}`}>
-      <div className="task-section-header">
-        <span className="task-section-title">{title}</span>
-        {tasks.length > 0 && <span className="task-count">{tasks.length}</span>}
-      </div>
-      {tasks.length === 0
-        ? <div className="task-empty">{emptyLabel}</div>
-        : <div className="task-list">{tasks.map(t => <TaskRow key={t.id} task={t} />)}</div>
-      }
-    </div>
-  );
-}
+const STATUS_COLORS: Record<string, string> = {
+  delivered: 'status-completed', completed: 'status-completed',
+  paid: 'status-completed', resolved: 'status-completed', approved: 'status-completed',
+  'in-progress': 'status-in-progress', 'in-transit': 'status-in-progress',
+  'pending-approval': 'status-in-progress', pending: 'status-in-progress',
+  'customs-hold': 'status-blocked',
+};
 
-function MyTasks({ period }: { period: Period }) {
-  // Filter to current user — swap CURRENT_USER for auth session when authentication is added.
-  const userTasks = allTasks[period].filter(t => t.owner === CURRENT_USER);
-  const overdue    = userTasks.filter(t => t.status === 'overdue');
-  const open       = userTasks.filter(t => t.status === 'open');
-  const inProgress = userTasks.filter(t => t.status === 'in-progress');
-  const completed  = userTasks.filter(t => t.status === 'completed');
-  const periodWord = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'quarter';
+function KPIDetailPanel({ kpi, period, onClose }: { kpi: KPIItem; period: Period; onClose: () => void }) {
+  const records: KPIRecord[] = kpiRecords[kpi.label]?.[period] ?? [];
+  const periodLabel = timeRangeData[period].label;
+  const counterpartyHeader = records[0]?.counterpartyType ?? 'Counterparty';
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
 
   return (
     <>
-      <div className="page-header">
-        <h2>My Tasks</h2>
-        <div className="small">{CURRENT_USER} · {timeRangeData[period].label}</div>
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{kpi.label}</h3>
+            <div className="small" style={{ marginTop: 4 }}>
+              {records.length} record{records.length !== 1 ? 's' : ''} · {periodLabel}
+            </div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="panel-body">
+          {records.length === 0 ? (
+            <div className="panel-empty"><div className="panel-empty-icon">📋</div><div>No records for this period</div></div>
+          ) : (
+            <table className="record-table">
+              <thead>
+                <tr>
+                  <th>Ref</th><th>Name</th>
+                  {records.some(r => r.counterparty) && <th>{counterpartyHeader}</th>}
+                  <th>Owner</th><th>Status</th><th>Priority</th><th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map(r => (
+                  <tr key={r.id}>
+                    <td><span className="rec-id">{r.id}</span></td>
+                    <td>
+                      <div className="rec-name">{r.name}</div>
+                      {r.notes && <div className="rec-notes">{r.notes}</div>}
+                    </td>
+                    {records.some(rec => rec.counterparty) && (
+                      <td><span className="rec-counterparty">{r.counterparty ?? '—'}</span></td>
+                    )}
+                    <td>{r.owner}</td>
+                    <td><span className={`status-badge ${STATUS_COLORS[r.status] ?? 'status-in-progress'}`}>{r.status.replace(/-/g, ' ')}</span></td>
+                    <td><span className={`priority-label priority-${r.priority}`}><span className="priority-dot" />{r.priority}</span></td>
+                    <td><span className="small">{r.date}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
-
-      <div className="grid kpis">
-        <div className={`card kpi-p2${overdue.length > 0 ? ' task-summary-overdue card-alert' : ''}`}>
-          <div className="kpi-label">Overdue</div>
-          <div className="kpi-value">{overdue.length}</div>
-          <div className="kpi-note">{overdue.length > 0 ? 'Needs immediate attention' : 'Nothing overdue'}</div>
-        </div>
-        <div className="card kpi-p2 task-summary-open">
-          <div className="kpi-label">Open</div>
-          <div className="kpi-value" style={{ color: 'var(--color-accent)' }}>{open.length}</div>
-          <div className="kpi-note">Not yet started</div>
-        </div>
-        <div className="card kpi-p2">
-          <div className="kpi-label">In Progress</div>
-          <div className="kpi-value" style={{ color: 'var(--color-warning)' }}>{inProgress.length}</div>
-          <div className="kpi-note">Currently active</div>
-        </div>
-        <div className="card kpi-p3">
-          <div className="kpi-label">Completed</div>
-          <div className="kpi-value">{completed.length}</div>
-          <div className="kpi-note">This {periodWord}</div>
-        </div>
-      </div>
-
-      {overdue.length > 0 && (
-        <TaskSection title="Overdue" tasks={overdue} emptyLabel="" variant="overdue" />
-      )}
-      <TaskSection
-        title="Open"
-        tasks={open}
-        emptyLabel={`No open tasks this ${periodWord}`}
-        variant="open"
-      />
-      <TaskSection
-        title="In Progress"
-        tasks={inProgress}
-        emptyLabel="No tasks currently in progress"
-        variant="in-progress"
-      />
-      <TaskSection
-        title="Completed"
-        tasks={completed}
-        emptyLabel={`No completed tasks this ${periodWord}`}
-        variant="completed"
-      />
     </>
   );
 }
 
-const CATEGORY_CONTRIBUTION: Record<string, (n: number) => string> = {
-  Logistics:   n => `${n} shipment${n !== 1 ? 's' : ''} released`,
-  Procurement: n => `${n} procurement action${n !== 1 ? 's' : ''} completed`,
-  Deployments: n => `${n} installation${n !== 1 ? 's' : ''} advanced`,
-  Inventory:   n => `${n} inventory update${n !== 1 ? 's' : ''} done`,
-  Finance:     n => `${n} payment${n !== 1 ? 's' : ''} processed`,
-  Projects:    n => `${n} milestone${n !== 1 ? 's' : ''} reached`,
-  Operations:  n => `${n} task${n !== 1 ? 's' : ''} completed`,
-  Support:     n => `${n} support session${n !== 1 ? 's' : ''} delivered`,
-};
+// ─── Team Member Contribution Panel (Last Updates on Executive Dashboard) ──
 
-function getContributionLines(tasks: Task[]): string[] {
-  const completed = tasks.filter(t => t.status === 'completed');
-  if (completed.length > 0) {
-    const byCategory = completed.reduce<Record<string, number>>((acc, t) => {
-      acc[t.category] = (acc[t.category] || 0) + 1;
-      return acc;
-    }, {});
-    return Object.entries(byCategory)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 2)
-      .map(([cat, count]) => {
-        const fn = CATEGORY_CONTRIBUTION[cat];
-        return fn ? fn(count) : `${count} ${cat.toLowerCase()} task${count !== 1 ? 's' : ''} completed`;
-      });
-  }
-  const inProgress = tasks.filter(t => t.status === 'in-progress');
-  if (inProgress.length > 0) return [`${inProgress.length} task${inProgress.length !== 1 ? 's' : ''} in progress`];
-  return [];
-}
-
-function MemberTaskGroup({ title, tasks, muted }: { title: string; tasks: Task[]; muted?: boolean }) {
-  if (tasks.length === 0) return null;
-  return (
-    <div className={`member-task-group${muted ? ' member-task-group-muted' : ''}`}>
-      <div className="task-section-header">
-        <span className="task-section-title">{title}</span>
-        <span className="task-count">{tasks.length}</span>
-      </div>
-      <div className="task-list">
-        {tasks.map(t => (
-          <div key={t.id} className={`task-row task-row-${t.status}`}>
-            <div className="task-main">
-              <div className="task-title">{t.title}</div>
-              <div className="task-meta">
-                <span className="pill" style={{ fontSize: 11, padding: '2px 7px' }}>{t.category}</span>
-              </div>
-            </div>
-            <div className="task-attrs">
-              <span className={`priority-label priority-${t.priority}`}>
-                <span className="priority-dot" />
-                {t.priority}
-              </span>
-              <span className="small" style={{ whiteSpace: 'nowrap' }}>Due {t.dueDate}</span>
-              <span className="small" style={{ whiteSpace: 'nowrap', color: 'var(--color-muted)' }}>↻ {t.lastUpdated}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function TeamMemberPanel({ memberName, period, onClose }: {
-  memberName: string;
-  period: Period;
-  onClose: () => void;
+function TeamMemberPanel({ memberName, period, supportLogs, onClose }: {
+  memberName: string; period: Period; supportLogs: SupportLog[]; onClose: () => void;
 }) {
-  // Derives directly from allTasks — no separate mock data.
-  // When period changes while the panel is open, tasks update automatically.
-  const tasks      = allTasks[period].filter(t => t.owner === memberName);
-  const overdue    = tasks.filter(t => t.status === 'overdue');
-  const inProgress = tasks.filter(t => t.status === 'in-progress');
-  const open       = tasks.filter(t => t.status === 'open');
-  const completed  = tasks.filter(t => t.status === 'completed');
+  const logs = filterLogsByPeriod(supportLogs, period).filter(l => l.employeeName === memberName);
+  const hours = logs.reduce((s, l) => s + l.hours, 0);
+  const depts = [...new Set(logs.map(l => l.department))];
+  const byDept = buildSupportByDept(logs);
   const periodWord = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'quarter';
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
   }, [onClose]);
 
   return (
@@ -367,23 +213,52 @@ function TeamMemberPanel({ memberName, period, onClose }: {
           <div>
             <h3>{memberName}</h3>
             <div className="small" style={{ marginTop: 4 }}>
-              {completed.length > 0 ? `${completed.length} completed · ` : ''}{tasks.length} total · {timeRangeData[period].label}
+              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {timeRangeData[period].label}
             </div>
           </div>
           <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="panel-body">
-          {tasks.length === 0 ? (
+          {logs.length === 0 ? (
             <div className="panel-empty">
-              <div className="panel-empty-icon">📋</div>
-              <div>No updates for {memberName} this {periodWord}</div>
+              <div className="panel-empty-icon">📊</div>
+              <div>No contributions logged this {periodWord}</div>
             </div>
           ) : (
             <>
-              <MemberTaskGroup title="Completed"   tasks={completed} />
-              <MemberTaskGroup title="In Progress" tasks={inProgress} />
-              <MemberTaskGroup title="Open"        tasks={open} />
-              <MemberTaskGroup title="Overdue"     tasks={overdue} muted />
+              <div style={{ marginBottom: 20 }}>
+                <div className="task-section-header" style={{ marginBottom: 8 }}>
+                  <span className="task-section-title">Hours by Department</span>
+                </div>
+                {byDept.map(({ name, hours: h }) => (
+                  <div key={name} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,.05)', fontSize: 13 }}>
+                    <span>{name}</span>
+                    <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{h}h</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="task-section-header" style={{ marginBottom: 8 }}>
+                  <span className="task-section-title">Activity Log</span>
+                  <span className="task-count">{logs.length}</span>
+                </div>
+                <table className="record-table">
+                  <thead><tr><th>Activity</th><th>Dept</th><th>Hours</th><th>Date</th></tr></thead>
+                  <tbody>
+                    {logs.map(l => (
+                      <tr key={l.id}>
+                        <td>
+                          <div className="rec-name">{l.title}</div>
+                          {l.notes && <div className="rec-notes">{l.notes}</div>}
+                        </td>
+                        <td><span className="pill" style={{ fontSize: 11, padding: '2px 6px' }}>{l.department}</span></td>
+                        <td style={{ fontWeight: 700, color: 'var(--color-completed)', whiteSpace: 'nowrap' }}>{l.hours}h</td>
+                        <td><span className="small">{l.date}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </div>
@@ -392,29 +267,219 @@ function TeamMemberPanel({ memberName, period, onClose }: {
   );
 }
 
-function Executive({ period }: { period: Period }) {
+// ─── Employee Contribution Panel (Team Contributions page) ─────────────────
+
+function EmployeePanel({ member, period, supportLogs, onClose }: {
+  member: TeamMember; period: Period; supportLogs: SupportLog[]; onClose: () => void;
+}) {
+  const logs = filterLogsByPeriod(supportLogs, period).filter(l => l.employeeId === member.id);
+  const hours = logs.reduce((s, l) => s + l.hours, 0);
+  const depts = [...new Set(logs.map(l => l.department))];
+  const byDept = buildSupportByDept(logs);
+  const periodWord = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'quarter';
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{member.name}</h3>
+            <div className="small" style={{ marginTop: 2 }}>{member.role}</div>
+            <div className="small" style={{ marginTop: 4 }}>
+              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {timeRangeData[period].label}
+            </div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="panel-body">
+          {logs.length === 0 ? (
+            <div className="panel-empty">
+              <div className="panel-empty-icon">📊</div>
+              <div>No contributions logged this {periodWord}</div>
+            </div>
+          ) : (
+            <>
+              <div style={{ marginBottom: 20 }}>
+                <div className="task-section-header" style={{ marginBottom: 8 }}>
+                  <span className="task-section-title">Hours by Department</span>
+                </div>
+                {byDept.map(({ name, hours: h }) => (
+                  <div key={name} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,.05)', fontSize: 13 }}>
+                    <span>{name}</span>
+                    <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{h}h</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="task-section-header" style={{ marginBottom: 8 }}>
+                  <span className="task-section-title">Contribution History</span>
+                  <span className="task-count">{logs.length}</span>
+                </div>
+                <table className="record-table">
+                  <thead><tr><th>Activity</th><th>Department</th><th>Hours</th><th>Date</th></tr></thead>
+                  <tbody>
+                    {logs.map(l => (
+                      <tr key={l.id}>
+                        <td>
+                          <div className="rec-name">{l.title}</div>
+                          {l.notes && <div className="rec-notes">{l.notes}</div>}
+                        </td>
+                        <td><span className="pill" style={{ fontSize: 11, padding: '2px 6px' }}>{l.department}</span></td>
+                        <td style={{ fontWeight: 700, color: 'var(--color-completed)', whiteSpace: 'nowrap' }}>{l.hours}h</td>
+                        <td><span className="small">{l.date}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Team Contributions page ───────────────────────────────────────────────
+
+function TeamContributions({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
+  const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
+  const filtered = filterLogsByPeriod(supportLogs, period);
+
+  const memberStats = teamMembers.map(m => {
+    const logs = filtered.filter(l => l.employeeId === m.id);
+    const hours = logs.reduce((s, l) => s + l.hours, 0);
+    const depts = [...new Set(logs.map(l => l.department))];
+    const lastLog = logs[0];
+    return { member: m, hours, activities: logs.length, depts, lastLog };
+  }).filter(s => s.activities > 0);
+
+  const totalHours = filtered.reduce((s, l) => s + l.hours, 0);
+  const totalActivities = filtered.length;
+  const activeMembersCount = memberStats.length;
+  const deptCount = [...new Set(filtered.map(l => l.department))].length;
+
+  return (
+    <>
+      {selectedMember && (
+        <EmployeePanel member={selectedMember} period={period} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />
+      )}
+
+      <div className="page-header">
+        <h2>Team Contributions</h2>
+        <div className="small">Operations team impact · {timeRangeData[period].label}</div>
+      </div>
+
+      <div className="grid kpis">
+        <div className="card kpi-p1">
+          <div className="kpi-label">Total Support Hours</div>
+          <div className="kpi-value">{totalHours}h</div>
+          <div className="kpi-note">Team combined output</div>
+        </div>
+        <div className="card kpi-p1">
+          <div className="kpi-label">Activities Logged</div>
+          <div className="kpi-value">{totalActivities}</div>
+          <div className="kpi-note">Completed contributions</div>
+        </div>
+        <div className="card kpi-p2">
+          <div className="kpi-label">Active Contributors</div>
+          <div className="kpi-value">{activeMembersCount}</div>
+          <div className="kpi-note">Members with activity</div>
+        </div>
+        <div className="card kpi-p2">
+          <div className="kpi-label">Departments Supported</div>
+          <div className="kpi-value">{deptCount}</div>
+          <div className="kpi-note">Cross-functional reach</div>
+        </div>
+      </div>
+
+      {memberStats.length === 0 ? (
+        <div className="card"><div className="panel-empty"><div className="panel-empty-icon">📊</div><div>No contributions logged for this period</div></div></div>
+      ) : (
+        <div className="contrib-grid">
+          {memberStats.map(({ member, hours, activities, depts, lastLog }) => (
+            <div key={member.id} className="contrib-card" onClick={() => setSelectedMember(member)} role="button" tabIndex={0} onKeyDown={e => e.key === 'Enter' && setSelectedMember(member)}>
+              <div className="contrib-header">
+                <div className="contrib-name">{member.name}</div>
+                <div className="small">{member.role}</div>
+              </div>
+              <div className="contrib-stats">
+                <div className="contrib-stat">
+                  <div className="contrib-stat-value">{hours}h</div>
+                  <div className="contrib-stat-label">Hours</div>
+                </div>
+                <div className="contrib-stat">
+                  <div className="contrib-stat-value">{activities}</div>
+                  <div className="contrib-stat-label">Activities</div>
+                </div>
+                <div className="contrib-stat">
+                  <div className="contrib-stat-value">{depts.length}</div>
+                  <div className="contrib-stat-label">Depts</div>
+                </div>
+              </div>
+              <div className="contrib-depts">
+                {depts.slice(0, 3).map(d => <span key={d} className="pill" style={{ fontSize: 11 }}>{d}</span>)}
+              </div>
+              {lastLog && <div className="contrib-last small">Latest: {lastLog.title}</div>}
+              <button className="last-updates-btn" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }}>
+                View Contributions ↗
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Executive Dashboard ───────────────────────────────────────────────────
+
+function Executive({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
   const data = timeRangeData[period];
   const [selectedKpi, setSelectedKpi]       = useState<KPIItem | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
 
-  // Only one panel open at a time
   const openKpi    = (kpi: KPIItem) => { setSelectedMember(null); setSelectedKpi(kpi); };
   const openMember = (name: string) => { setSelectedKpi(null); setSelectedMember(name); };
+
+  // Derive live metrics from SupportLog
+  const filtered        = filterLogsByPeriod(supportLogs, period);
+  const derivedActivities = filtered.length;
+  const derivedHours    = filtered.reduce((s, l) => s + l.hours, 0);
+  const derivedSupport  = buildSupportByDept(filtered);
+
+  // Override two KPI values with live derived data
+  const kpis = data.kpis.map(k => {
+    if (k.label === 'Activities Completed')      return { ...k, value: String(derivedActivities) };
+    if (k.label === 'Cross-Team Support Hours')  return { ...k, value: `${derivedHours}h` };
+    return k;
+  });
 
   return (
     <>
       {selectedKpi    && <KPIDetailPanel kpi={selectedKpi} period={period} onClose={() => setSelectedKpi(null)} />}
-      {selectedMember && <TeamMemberPanel memberName={selectedMember} period={period} onClose={() => setSelectedMember(null)} />}
+      {selectedMember && <TeamMemberPanel memberName={selectedMember} period={period} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
 
-      <KPIGrid items={data.kpis} onKpiClick={openKpi} />
+      <KPIGrid items={kpis} onKpiClick={openKpi} />
 
       <div className="grid two">
         <div className="card">
           <h2 className="section-title">Team Last Updates</h2>
           <div className="team-pulse-list">
             {teamPulseStatus.filter(m => m.submitted).map(m => {
-              const memberTasks = allTasks[period].filter(t => t.owner === m.name);
-              const lines = getContributionLines(memberTasks);
+              const memberLogs = filtered.filter(l => l.employeeName === m.name);
+              const hours = memberLogs.reduce((s, l) => s + l.hours, 0);
+              const depts = [...new Set(memberLogs.map(l => l.department))];
+              const lines: string[] = [];
+              if (hours > 0) lines.push(`${hours}h delivered`);
+              if (depts.length > 0) lines.push(depts.slice(0, 2).join(' · '));
               return (
                 <div key={m.name} className="team-pulse-item">
                   <span className="pulse-check">✓</span>
@@ -434,10 +499,10 @@ function Executive({ period }: { period: Period }) {
         <div className="card">
           <h2 className="section-title">Support Hours by Department</h2>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={data.supportByDept} layout="vertical" margin={{ top: 4, right: 54, left: 0, bottom: 4 }}>
+            <BarChart data={derivedSupport} layout="vertical" margin={{ top: 4, right: 54, left: 0, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.07)" />
               <XAxis type="number" stroke="var(--color-muted)" tick={{ fontSize: 12 }} />
-              <YAxis type="category" dataKey="name" stroke="var(--color-muted)" tick={{ fontSize: 12 }} width={52} />
+              <YAxis type="category" dataKey="name" stroke="var(--color-muted)" tick={{ fontSize: 12 }} width={72} />
               <Tooltip contentStyle={{ background: '#0d192b', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10 }} />
               <Bar dataKey="hours" fill="var(--color-completed)" radius={[0, 8, 8, 0]}>
                 <LabelList dataKey="hours" position="right" formatter={(v: unknown) => `${v}h`} style={{ fill: '#ffffff', fontWeight: 700, fontSize: 12 }} />
@@ -463,6 +528,8 @@ function Executive({ period }: { period: Period }) {
   );
 }
 
+// ─── Metric pages (Logistics / Procurement / Deployments) ─────────────────
+
 function MetricPage({ title, intro, rows }: { title: string; intro: string; rows: { metric: string; value: string; detail: string; alert?: boolean }[] }) {
   return (
     <>
@@ -483,37 +550,56 @@ function MetricPage({ title, intro, rows }: { title: string; intro: string; rows
   );
 }
 
-function Support({ period }: { period: Period }) {
-  const data = timeRangeData[period];
-  const activityCounts = { weekly: [18, 12, 9, 7, 6], monthly: [72, 48, 36, 28, 24], quarterly: [216, 144, 108, 84, 72] };
-  const counts = activityCounts[period];
-  const impacts = ['Urgent builds, testing support', 'Project procurement and shipments', 'Operational enablement', 'Supplier payments', 'Customer coordination'];
+// ─── Cross Functional Support (fully derived) ──────────────────────────────
+
+function Support({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
+  const filtered = filterLogsByPeriod(supportLogs, period);
+  const byDept   = buildSupportByDept(filtered);
+  const impacts: Record<string, string> = {
+    'R&D': 'Urgent builds, testing support',
+    'Defence': 'Project procurement and shipments',
+    'Product': 'Operational enablement',
+    'Finance': 'Supplier payments',
+    'Customer Success': 'Customer coordination',
+    'Sales': 'Sales support and enablement',
+    'Operations': 'Internal operations support',
+  };
+
   return (
     <>
       <div className="page-header">
         <h2>Cross Functional Support</h2>
-        <div className="small">Operations support hours by department — {timeRangeData[period].label}</div>
+        <div className="small">Operations support hours by department · {timeRangeData[period].label}</div>
       </div>
       <div className="card">
-        <table className="table">
-          <thead>
-            <tr><th>Department</th><th>Support Hours</th><th>Activities</th><th>Primary Impact</th></tr>
-          </thead>
-          <tbody>
-            {data.supportByDept.map((d, i) => (
-              <tr key={d.name}>
-                <td><b>{d.name}</b></td>
-                <td>{d.hours}h</td>
-                <td>{counts[i]}</td>
-                <td>{impacts[i]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {byDept.length === 0 ? (
+          <div className="panel-empty"><div className="panel-empty-icon">📊</div><div>No support hours logged for this period</div></div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>Department</th><th>Support Hours</th><th>Activities</th><th>Primary Impact</th></tr>
+            </thead>
+            <tbody>
+              {byDept.map(({ name, hours }) => {
+                const activities = filtered.filter(l => l.department === name).length;
+                return (
+                  <tr key={name}>
+                    <td><b>{name}</b></td>
+                    <td>{hours}h</td>
+                    <td>{activities}</td>
+                    <td>{impacts[name] ?? 'Cross-functional support'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </>
   );
 }
+
+// ─── Highlights ────────────────────────────────────────────────────────────
 
 function Highlights({ period }: { period: Period }) {
   const data = timeRangeData[period];
@@ -521,7 +607,7 @@ function Highlights({ period }: { period: Period }) {
     <>
       <div className="page-header">
         <h2>Operational Highlights</h2>
-        <div className="small">Key achievements and delivery milestones — {timeRangeData[period].label}</div>
+        <div className="small">Key achievements and delivery milestones · {timeRangeData[period].label}</div>
       </div>
       <div className="card highlight">
         {data.highlights.map(h => (
@@ -536,143 +622,166 @@ function Highlights({ period }: { period: Period }) {
   );
 }
 
-function ActivityFeed({ period }: { period: Period }) {
-  const data = timeRangeData[period];
+// ─── Activity Feed (derived from SupportLog) ───────────────────────────────
+
+function ActivityFeed({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
+  const logs = filterLogsByPeriod(supportLogs, period);
   return (
     <>
       <div className="page-header">
         <h2>Operations Activity Feed</h2>
-        <div className="small">Timeline of operational activities — {timeRangeData[period].label}</div>
+        <div className="small">Live contribution log · {timeRangeData[period].label}</div>
       </div>
-      <div className="timeline">
-        {data.feed.map(e => (
-          <div className="event" key={e.title}>
-            <div><span className="pill">{e.date}</span></div>
-            <div>
-              <span className="pill">{e.area}</span>
-              <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{e.title}</h3>
-              <div className="small">{e.detail}</div>
-              <div className="event-meta">
-                <span className="owner-tag">↳ {e.owner}</span>
-                <span className={`status-badge status-${e.status}`}>{e.status}</span>
+      {logs.length === 0 ? (
+        <div className="card"><div className="panel-empty"><div className="panel-empty-icon">📋</div><div>No activities logged for this period</div></div></div>
+      ) : (
+        <div className="timeline">
+          {logs.map(l => (
+            <div key={l.id} className="event">
+              <div><span className="pill">{l.date}</span></div>
+              <div>
+                <span className="pill">{l.department}</span>
+                <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{l.title}</h3>
+                {l.notes && <div className="small">{l.notes}</div>}
+                <div className="event-meta">
+                  <span className="owner-tag">↳ {l.employeeName}</span>
+                  <span className="status-badge status-completed">{l.hours}h</span>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
 
-function AddWeeklyActivity() {
-  const [activities, setActivities] = useState([
-    { employee: 'Ops Team', category: 'Procurement', department: 'R&D', title: 'Emergency R&D procurement completed', highlight: 'Yes' },
-    { employee: 'Ops Team', category: 'Logistics', department: 'Operations', title: '4 systems released from BAZ', highlight: 'Yes' }
-  ]);
-  const [category, setCategory] = useState('Procurement');
-  const [department, setDepartment] = useState('Operations');
-  const [employee, setEmployee] = useState('');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [highlight, setHighlight] = useState(false);
+// ─── Add Weekly Activity (primary contribution logging engine) ─────────────
 
-  const saveActivity = () => {
-    if (!title.trim()) { alert('Please enter an activity title'); return; }
-    setActivities([{ employee, category, department, title, highlight: highlight ? 'Yes' : 'No' }, ...activities]);
-    setEmployee(''); setTitle(''); setDescription(''); setHighlight(false);
+function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
+  const [employeeId,  setEmployeeId]  = useState('');
+  const [department,  setDepartment]  = useState('R&D');
+  const [category,    setCategory]    = useState('Procurement');
+  const [title,       setTitle]       = useState('');
+  const [hours,       setHours]       = useState('');
+  const [date,        setDate]        = useState(new Date().toISOString().slice(0, 10));
+  const [notes,       setNotes]       = useState('');
+  const [recent,      setRecent]      = useState<SupportLog[]>([]);
+
+  const save = () => {
+    const member = teamMembers.find(m => m.id === employeeId);
+    if (!member || !title.trim() || !hours || parseFloat(hours) <= 0) {
+      alert('Please fill in all required fields (Employee, Title, Hours).');
+      return;
+    }
+    const log: SupportLog = {
+      id: `LOG-${Date.now()}`,
+      employeeId,
+      employeeName: member.name,
+      department,
+      category,
+      title,
+      hours: parseFloat(hours),
+      date,
+      week: getWeekTag(date),
+      notes,
+    };
+    addLog(log);
+    setRecent(prev => [log, ...prev]);
+    setTitle(''); setHours(''); setNotes('');
   };
 
   return (
     <>
       <div className="page-header">
         <h2>Add Weekly Activity</h2>
-        <div className="small">Capture completed work, achievements and operational impact.</div>
+        <div className="small">Log completed support and operational contributions. All submissions update the dashboard in real time.</div>
       </div>
 
       <div className="card">
-        <h2 className="section-title">Weekly Team Input</h2>
+        <h2 className="section-title">Log Contribution</h2>
         <div className="grid two">
           <div>
-            <div className="kpi-label">Category</div>
-            <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option>Procurement</option>
-              <option>Logistics</option>
-              <option>Deployments &amp; Installations</option>
-              <option>Inventory</option>
-              <option>Finance Support</option>
-              <option>Cross Functional Support</option>
+            <div className="kpi-label">Employee *</div>
+            <select className="input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+              <option value="">— Select employee —</option>
+              {teamMembers.map(m => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
             </select>
           </div>
           <div>
-            <div className="kpi-label">Department Supported</div>
-            <select className="input" value={department} onChange={(e) => setDepartment(e.target.value)}>
-              <option>Operations</option>
-              <option>R&amp;D</option>
-              <option>Defence</option>
-              <option>Product</option>
-              <option>Finance</option>
-              <option>Customer Success</option>
+            <div className="kpi-label">Department Supported *</div>
+            <select className="input" value={department} onChange={e => setDepartment(e.target.value)}>
+              {['R&D','Product','Finance','Customer Success','Sales','Defence','Operations'].map(d => <option key={d}>{d}</option>)}
             </select>
           </div>
           <div>
-            <div className="kpi-label">Employee Name</div>
-            <input className="input" value={employee} onChange={(e) => setEmployee(e.target.value)} placeholder="Enter employee name" />
+            <div className="kpi-label">Activity Category</div>
+            <select className="input" value={category} onChange={e => setCategory(e.target.value)}>
+              {['Procurement','Logistics','Deployments','Finance Support','R&D Support','Product Support','CS Support','Defence Support','Operations'].map(c => <option key={c}>{c}</option>)}
+            </select>
           </div>
           <div>
-            <div className="kpi-label">Activity Title</div>
-            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Example: Emergency R&D procurement completed" />
+            <div className="kpi-label">Hours Invested *</div>
+            <input className="input" type="number" min="0.5" step="0.5" value={hours} onChange={e => setHours(e.target.value)} placeholder="e.g. 2.5" />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div className="kpi-label">Activity Title *</div>
+            <input className="input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Test system preparation for R&D sprint" />
+          </div>
+          <div>
+            <div className="kpi-label">Activity Date</div>
+            <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+          </div>
+          <div>
+            <div className="kpi-label">Notes</div>
+            <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional context or outcome" />
           </div>
         </div>
-        <div style={{ marginTop: 18 }}>
-          <div className="kpi-label">Short Description</div>
-          <textarea className="input" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe what was completed and why it mattered." />
-        </div>
-        <div style={{ marginTop: 16 }}>
-          <label style={{ fontSize: 14, display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-            <input type="checkbox" checked={highlight} onChange={(e) => setHighlight(e.target.checked)} />
-            Include in Weekly Highlights
-          </label>
-        </div>
-        <button className="save-button" onClick={saveActivity}>Save Activity</button>
+        <button className="save-button" onClick={save}>Log Activity</button>
       </div>
 
-      <div className="card">
-        <h2 className="section-title">Recent Team Activities</h2>
-        <table className="table">
-          <thead>
-            <tr><th>Employee</th><th>Category</th><th>Department</th><th>Activity</th><th>Highlight</th></tr>
-          </thead>
-          <tbody>
-            {activities.map((a, i) => (
-              <tr key={i}>
-                <td>{a.employee || '—'}</td>
-                <td>{a.category}</td>
-                <td>{a.department}</td>
-                <td><b>{a.title}</b></td>
-                <td>{a.highlight}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {recent.length > 0 && (
+        <div className="card">
+          <h2 className="section-title">Submitted This Session</h2>
+          <table className="table">
+            <thead><tr><th>Employee</th><th>Department</th><th>Activity</th><th>Hours</th><th>Date</th></tr></thead>
+            <tbody>
+              {recent.map(l => (
+                <tr key={l.id}>
+                  <td>{l.employeeName}</td>
+                  <td>{l.department}</td>
+                  <td><b>{l.title}</b>{l.notes && <div className="small">{l.notes}</div>}</td>
+                  <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{l.hours}h</td>
+                  <td>{l.date}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </>
   );
 }
 
+// ─── App ───────────────────────────────────────────────────────────────────
+
 export default function App() {
-  const [page, setPage] = useState('Executive Dashboard');
-  const [period, setPeriod] = useState<Period>('weekly');
+  const [page, setPage]           = useState('Executive Dashboard');
+  const [period, setPeriod]       = useState<Period>('weekly');
+  const [supportLogs, setSupportLogs] = useState<SupportLog[]>(seedSupportLogs);
+
+  const addLog = (log: SupportLog) => setSupportLogs(prev => [log, ...prev]);
   const data = timeRangeData[period];
 
-  let content = <Executive period={period} />;
-  if (page === 'My Tasks') content = <MyTasks period={period} />;
-  if (page === 'Logistics') content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
-  if (page === 'Procurement') content = <MetricPage title="Procurement" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={data.procurement} />;
-  if (page === 'Deployments & Installations') content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity." rows={data.deployments} />;
-  if (page === 'Cross Functional Support') content = <Support period={period} />;
-  if (page === 'Weekly Highlights') content = <Highlights period={period} />;
-  if (page === 'Activity Feed') content = <ActivityFeed period={period} />;
-  if (page === 'Add Weekly Activity') content = <AddWeeklyActivity />;
+  let content = <Executive period={period} supportLogs={supportLogs} />;
+  if (page === 'Team Contributions')           content = <TeamContributions period={period} supportLogs={supportLogs} />;
+  if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
+  if (page === 'Procurement')                  content = <MetricPage title="Procurement" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={data.procurement} />;
+  if (page === 'Deployments & Installations')  content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity." rows={data.deployments} />;
+  if (page === 'Cross Functional Support')     content = <Support period={period} supportLogs={supportLogs} />;
+  if (page === 'Weekly Highlights')            content = <Highlights period={period} />;
+  if (page === 'Activity Feed')                content = <ActivityFeed period={period} supportLogs={supportLogs} />;
+  if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} />;
 
   return <Shell page={page} setPage={setPage} period={period} setPeriod={setPeriod}>{content}</Shell>;
 }

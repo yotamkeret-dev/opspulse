@@ -515,90 +515,112 @@ export const kpiRecords: Record<string, Record<Period, KPIRecord[]>> = {
 };
 
 // ---------------------------------------------------------------------------
-// My Tasks
+// Team Members  (auth-ready: id maps to future userId)
 // ---------------------------------------------------------------------------
 
-export type Task = {
+export type TeamMember = {
+  id: string;     // auth-ready: replace with UUID from identity provider
+  name: string;
+  email: string;  // auth-ready: becomes the login identifier
+  role: string;
+};
+
+export const teamMembers: TeamMember[] = [
+  { id: 'yotam-keret',     name: 'Yotam Keret',     email: 'yotam.keret@orca-ai.io',     role: 'Operations Lead' },
+  { id: 'dan-cohen',       name: 'Dan Cohen',       email: 'dan.cohen@orca-ai.io',       role: 'Logistics Manager' },
+  { id: 'amit-levy',       name: 'Amit Levy',       email: 'amit.levy@orca-ai.io',       role: 'Procurement Specialist' },
+  { id: 'noa-shaked',      name: 'Noa Shaked',      email: 'noa.shaked@orca-ai.io',      role: 'Deployment Coordinator' },
+  { id: 'eliav-mizrahi',   name: 'Eliav Mizrahi',   email: 'eliav.mizrahi@orca-ai.io',   role: 'Operations Analyst' },
+  { id: 'liora-ben-david', name: 'Liora Ben David', email: 'liora.ben-david@orca-ai.io', role: 'Inventory Specialist' },
+  { id: 'omer-shapiro',    name: 'Omer Shapiro',    email: 'omer.shapiro@orca-ai.io',    role: 'Field Operations' },
+];
+
+// ---------------------------------------------------------------------------
+// Support Log  (single source of truth for all contribution tracking)
+// ---------------------------------------------------------------------------
+
+export type SupportLog = {
   id: string;
-  title: string;
-  owner: string;
-  priority: 'critical' | 'high' | 'medium' | 'low';
-  status: 'open' | 'in-progress' | 'completed' | 'overdue';
-  dueDate: string;
-  lastUpdated: string;
+  employeeId: string;   // auth-ready: maps to TeamMember.id; swap for session userId once auth added
+  employeeName: string; // denormalized for display
+  department: string;
   category: string;
-  description?: string;
+  title: string;
+  hours: number;
+  date: string;   // 'YYYY-MM-DD'
+  week: string;   // period bucket: 'W22', 'W21', …
+  notes: string;
 };
 
-export const allTasks: Record<Period, Task[]> = {
-  weekly: [
-    // Yotam Keret
-    { id: 'TASK-W001', title: 'Resolve System 124 customs documentation', owner: 'Yotam Keret', priority: 'critical', status: 'overdue', dueDate: 'May 24', lastUpdated: '3d ago', category: 'Logistics', description: 'Incomplete export certificate blocking customs release for Horizon Defense shipment' },
-    { id: 'TASK-W002', title: 'Q2 logistics review with leadership', owner: 'Yotam Keret', priority: 'high', status: 'overdue', dueDate: 'May 26', lastUpdated: '2d ago', category: 'Operations', description: 'Weekly ops review — rescheduled, needs to happen before end of week' },
-    { id: 'TASK-W003', title: 'Approve PO-4573 – System 120 components', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'May 29', lastUpdated: '1d ago', category: 'Procurement', description: 'GlobalTech Supply — $34K, pending approval before assembly can begin' },
-    { id: 'TASK-W004', title: 'Kappa Corp supply resolution – confirm alternative ETA', owner: 'Yotam Keret', priority: 'critical', status: 'open', dueDate: 'May 29', lastUpdated: '2d ago', category: 'Logistics', description: 'Supplier component missing — confirm alternative source ETA' },
-    { id: 'TASK-W005', title: 'BAZ capacity expansion – Phase 2 migration', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '1d ago', category: 'Projects', description: 'Stock migration to new racking — 60% complete, Phase 3 starts next week' },
-    { id: 'TASK-W006', title: 'Supplier payment batch – W22 sign-off', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '8h ago', category: 'Finance', description: '$284K payment batch — 6 of 8 invoices approved, 2 pending Finance review' },
-    { id: 'TASK-W007', title: 'System 118 shipment confirmed – Frontier Defense', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 27', lastUpdated: '1d ago', category: 'Logistics' },
-    { id: 'TASK-W008', title: 'Defence urgent shipment preparation', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 26', lastUpdated: '1d ago', category: 'Logistics' },
-    { id: 'TASK-W009', title: 'Emergency R&D component procurement', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 27', lastUpdated: '14h ago', category: 'Procurement' },
-    { id: 'TASK-W010', title: 'Q2 inventory accuracy check', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'May 25', lastUpdated: '2d ago', category: 'Inventory' },
-    // Dan Cohen
-    { id: 'TASK-W011', title: 'Customs follow-up – System 124 docs', owner: 'Dan Cohen', priority: 'critical', status: 'in-progress', dueDate: 'May 29', lastUpdated: '3d ago', category: 'Logistics' },
-    { id: 'TASK-W012', title: 'Approve spare parts kit – Vanguard Tech', owner: 'Dan Cohen', priority: 'medium', status: 'open', dueDate: 'May 30', lastUpdated: '18h ago', category: 'Procurement' },
-    { id: 'TASK-W013', title: 'PO-4572 expedite – Pacific Parts Direct', owner: 'Dan Cohen', priority: 'high', status: 'completed', dueDate: 'May 27', lastUpdated: '18h ago', category: 'Procurement' },
-    // Amit Levy
-    { id: 'TASK-W014', title: 'MSC deployment sign-off', owner: 'Amit Levy', priority: 'high', status: 'completed', dueDate: 'May 27', lastUpdated: '20h ago', category: 'Deployments' },
-    { id: 'TASK-W015', title: 'Support hours report – W22', owner: 'Amit Levy', priority: 'medium', status: 'open', dueDate: 'May 30', lastUpdated: '1d ago', category: 'Operations' },
-    // Noa Shaked
-    { id: 'TASK-W016', title: 'BAZ inventory reconciliation', owner: 'Noa Shaked', priority: 'medium', status: 'completed', dueDate: 'May 25', lastUpdated: '2d ago', category: 'Inventory' },
-    { id: 'TASK-W017', title: 'Zenith Site C – installation documentation', owner: 'Noa Shaked', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '20h ago', category: 'Deployments' },
-    // Eliav Mizrahi
-    { id: 'TASK-W018', title: 'Frontier Site Alpha – installation report', owner: 'Eliav Mizrahi', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '1d ago', category: 'Deployments' },
-  ],
-
-  monthly: [
-    // Yotam Keret
-    { id: 'TASK-M001', title: 'Monthly supplier payment cycle – May', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 26', lastUpdated: '1d ago', category: 'Finance' },
-    { id: 'TASK-M002', title: 'BAZ capacity expansion – Phase 2', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '1d ago', category: 'Projects', description: 'Phase 2 of 3 — 60% complete, Phase 3 scoping next week' },
-    { id: 'TASK-M003', title: 'Inventory system upgrade – UAT sign-off', owner: 'Yotam Keret', priority: 'critical', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '18h ago', category: 'Projects', description: 'UAT in progress — 3 critical bugs resolved, 2 remaining' },
-    { id: 'TASK-M004', title: 'Resolve System 124 customs documentation', owner: 'Yotam Keret', priority: 'critical', status: 'overdue', dueDate: 'May 24', lastUpdated: '3d ago', category: 'Logistics' },
-    { id: 'TASK-M005', title: 'Q2 logistics review with leadership', owner: 'Yotam Keret', priority: 'high', status: 'overdue', dueDate: 'May 26', lastUpdated: '2d ago', category: 'Operations' },
-    { id: 'TASK-M006', title: 'Approve PO-4573 – System 120 components', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'May 29', lastUpdated: '1d ago', category: 'Procurement' },
-    { id: 'TASK-M007', title: 'Kappa Corp supply resolution – confirm alternative ETA', owner: 'Yotam Keret', priority: 'critical', status: 'open', dueDate: 'May 29', lastUpdated: '2d ago', category: 'Logistics' },
-    { id: 'TASK-M008', title: 'New supplier onboarding – legal approval', owner: 'Yotam Keret', priority: 'medium', status: 'open', dueDate: 'Jun 15', lastUpdated: '3d ago', category: 'Procurement' },
-    { id: 'TASK-M009', title: 'Emergency R&D component procurement', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 27', lastUpdated: '14h ago', category: 'Procurement' },
-    { id: 'TASK-M010', title: 'Frontier Defense – 12-system batch shipped', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 5', lastUpdated: '3w ago', category: 'Logistics' },
-    { id: 'TASK-M011', title: 'Customs backlog clearance – 8 cases', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 19', lastUpdated: '1w ago', category: 'Logistics' },
-    { id: 'TASK-M012', title: 'Q2 inventory close – accuracy audit', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'Jun 1', lastUpdated: '12h ago', category: 'Inventory' },
-    // Other owners
-    { id: 'TASK-M013', title: 'Oracle accuracy project', owner: 'Dan Cohen', priority: 'high', status: 'completed', dueDate: 'May 20', lastUpdated: '1w ago', category: 'Inventory' },
-    { id: 'TASK-M014', title: 'MSC full deployment sign-off', owner: 'Amit Levy', priority: 'high', status: 'completed', dueDate: 'May 14', lastUpdated: '2w ago', category: 'Deployments' },
-    { id: 'TASK-M015', title: 'R&D monthly support coordination', owner: 'Noa Shaked', priority: 'medium', status: 'completed', dueDate: 'May 30', lastUpdated: '1d ago', category: 'Support' },
-    { id: 'TASK-M016', title: 'Oracle–SAP data mapping session', owner: 'Dan Cohen', priority: 'high', status: 'in-progress', dueDate: 'Jun 30', lastUpdated: '2d ago', category: 'Projects' },
-    { id: 'TASK-M017', title: 'Zenith Site C deployment docs', owner: 'Noa Shaked', priority: 'high', status: 'in-progress', dueDate: 'May 28', lastUpdated: '20h ago', category: 'Deployments' },
-  ],
-
-  quarterly: [
-    // Yotam Keret
-    { id: 'TASK-Q001', title: 'BAZ capacity expansion – full delivery', owner: 'Yotam Keret', priority: 'high', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '1d ago', category: 'Projects', description: 'Phase 2 of 3 complete — Phase 3 starts Jun 2' },
-    { id: 'TASK-Q002', title: 'Inventory system upgrade – production release', owner: 'Yotam Keret', priority: 'critical', status: 'in-progress', dueDate: 'Jun 20', lastUpdated: '18h ago', category: 'Projects', description: 'UAT in progress — release gate review Jun 15' },
-    { id: 'TASK-Q003', title: 'Regional deployment plan – Q3 handoff', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'Jun 25', lastUpdated: '2d ago', category: 'Projects' },
-    { id: 'TASK-Q004', title: 'Q2 ops review presentation', owner: 'Yotam Keret', priority: 'high', status: 'open', dueDate: 'Jun 30', lastUpdated: '1d ago', category: 'Operations' },
-    { id: 'TASK-Q005', title: 'Resolve System 124 customs documentation', owner: 'Yotam Keret', priority: 'critical', status: 'overdue', dueDate: 'May 24', lastUpdated: '3d ago', category: 'Logistics' },
-    { id: 'TASK-Q006', title: 'Q2 logistics review with leadership', owner: 'Yotam Keret', priority: 'high', status: 'overdue', dueDate: 'May 26', lastUpdated: '2d ago', category: 'Operations' },
-    { id: 'TASK-Q007', title: 'Q2 supplier renegotiation – 3 contracts', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'Apr 15', lastUpdated: '6w ago', category: 'Procurement' },
-    { id: 'TASK-Q008', title: 'BAZ safety audit and certification', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'Apr 22', lastUpdated: '5w ago', category: 'Operations' },
-    { id: 'TASK-Q009', title: 'Enterprise batch shipment – 28 units', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'Apr 18', lastUpdated: '7w ago', category: 'Logistics' },
-    { id: 'TASK-Q010', title: 'Q2 inventory accuracy close', owner: 'Yotam Keret', priority: 'medium', status: 'completed', dueDate: 'Jun 1', lastUpdated: '12h ago', category: 'Inventory' },
-    { id: 'TASK-Q011', title: 'Emergency R&D procurement programme', owner: 'Yotam Keret', priority: 'critical', status: 'completed', dueDate: 'May 27', lastUpdated: '14h ago', category: 'Procurement' },
-    { id: 'TASK-Q012', title: 'Customs backlog clearance – Q2', owner: 'Yotam Keret', priority: 'high', status: 'completed', dueDate: 'May 19', lastUpdated: '1w ago', category: 'Logistics' },
-    // Other owners
-    { id: 'TASK-Q013', title: 'Oracle–SAP integration pilot', owner: 'Dan Cohen', priority: 'high', status: 'in-progress', dueDate: 'Jun 30', lastUpdated: '2d ago', category: 'Projects' },
-    { id: 'TASK-Q014', title: 'New supplier onboarding – 4 vendors', owner: 'Amit Levy', priority: 'medium', status: 'in-progress', dueDate: 'Jun 15', lastUpdated: '3d ago', category: 'Procurement' },
-    { id: 'TASK-Q015', title: 'Customer portal – ops module spec', owner: 'Noa Shaked', priority: 'high', status: 'in-progress', dueDate: 'Jun 30', lastUpdated: '1d ago', category: 'Projects' },
-    { id: 'TASK-Q016', title: 'Q2 cross-functional support review', owner: 'Eliav Mizrahi', priority: 'medium', status: 'open', dueDate: 'Jun 25', lastUpdated: '4d ago', category: 'Support' },
-    { id: 'TASK-Q017', title: 'Q1 ERP data cleanup', owner: 'Dan Cohen', priority: 'medium', status: 'completed', dueDate: 'Mar 31', lastUpdated: '9w ago', category: 'Projects' },
-    { id: 'TASK-Q018', title: 'BAZ safety audit', owner: 'Noa Shaked', priority: 'medium', status: 'completed', dueDate: 'Apr 22', lastUpdated: '5w ago', category: 'Operations' },
-  ],
+// Week tags each period includes
+export const PERIOD_WEEKS: Record<Period, string[]> = {
+  weekly:    ['W22'],
+  monthly:   ['W22','W21','W20','W19','W18'],
+  quarterly: ['W22','W21','W20','W19','W18','W17','W16','W15','W14','W13'],
 };
+
+export function filterLogsByPeriod(logs: SupportLog[], period: Period): SupportLog[] {
+  return logs.filter(l => PERIOD_WEEKS[period].includes(l.week));
+}
+
+// Seed data — W22 sums to 126 h matching previous mock KPI values
+export const seedSupportLogs: SupportLog[] = [
+  // === W22 (May 26 – Jun 1) — 126h total ===
+  { id:'LOG-2201', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'Procurement',     title:'Emergency R&D component sourcing',        hours:14, date:'2025-05-27', week:'W22', notes:'Sourced 4 components under 24h for R&D sprint' },
+  { id:'LOG-2202', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Finance',         category:'Finance Support', title:'Supplier payment batch sign-off',          hours:10, date:'2025-05-26', week:'W22', notes:'$284K payment batch coordinated with Finance' },
+  { id:'LOG-2203', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Defence',         category:'Logistics',       title:'Defence shipment preparation',             hours: 8, date:'2025-05-26', week:'W22', notes:'Urgent Defence shipment coordinated end-to-end' },
+  { id:'LOG-2204', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'R&D',             category:'R&D Support',     title:'R&D prototype testing coordination',       hours:12, date:'2025-05-27', week:'W22', notes:'Test equipment procurement and setup for R&D' },
+  { id:'LOG-2205', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Defence project procurement batch',         hours: 8, date:'2025-05-25', week:'W22', notes:'4 POs raised and approved same day' },
+  { id:'LOG-2206', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Customer Success', category:'CS Support',      title:'Customer delivery documentation',           hours: 8, date:'2025-05-27', week:'W22', notes:'Delivery docs coordinated for 3 customers' },
+  { id:'LOG-2207', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Product roadmap materials preparation',     hours:14, date:'2025-05-26', week:'W22', notes:'3 kits prepared for internal product showcase' },
+  { id:'LOG-2208', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'R&D',             category:'R&D Support',     title:'R&D lab component delivery',               hours: 8, date:'2025-05-24', week:'W22', notes:'8 components sourced and delivered to R&D lab' },
+  { id:'LOG-2209', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Finance',         category:'Finance Support', title:'Finance invoice reconciliation support',    hours: 6, date:'2025-05-27', week:'W22', notes:'Invoice review for Q2 framework agreement' },
+  { id:'LOG-2210', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Defence',         category:'Logistics',       title:'Defence logistics coordination',            hours: 9, date:'2025-05-25', week:'W22', notes:'End-to-end logistics for urgent Defence delivery' },
+  { id:'LOG-2211', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Customer Success', category:'CS Support',      title:'Customer handover support',                 hours: 5, date:'2025-05-27', week:'W22', notes:'3 customer handovers coordinated' },
+  { id:'LOG-2212', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Product',         category:'Product Support', title:'Product operational enablement',            hours: 8, date:'2025-05-26', week:'W22', notes:'Spec reviews and prototype materials' },
+  { id:'LOG-2213', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'R&D',             category:'R&D Support',     title:'R&D emergency parts delivery',              hours: 8, date:'2025-05-27', week:'W22', notes:'Urgent component delivery for R&D sprint' },
+  { id:'LOG-2214', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'Product',         category:'Product Support', title:'Product operations support',                hours: 6, date:'2025-05-28', week:'W22', notes:'Operational support for Product team deliverable' },
+  { id:'LOG-2215', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'Finance',         category:'Finance Support', title:'Finance payment tracking',                  hours: 2, date:'2025-05-26', week:'W22', notes:'Payment status monitoring and reporting' },
+  // === W21 (May 19 – 25) ===
+  { id:'LOG-2121', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'R&D Support',     title:'R&D sprint component support',             hours:16, date:'2025-05-22', week:'W21', notes:'' },
+  { id:'LOG-2122', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Finance',         category:'Finance Support', title:'Weekly supplier payment run',              hours: 8, date:'2025-05-21', week:'W21', notes:'' },
+  { id:'LOG-2123', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Defence procurement batch',                hours:14, date:'2025-05-20', week:'W21', notes:'' },
+  { id:'LOG-2124', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Customer Success', category:'CS Support',      title:'CS delivery coordination',                  hours: 7, date:'2025-05-22', week:'W21', notes:'' },
+  { id:'LOG-2125', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Product sprint support',                   hours:12, date:'2025-05-21', week:'W21', notes:'' },
+  { id:'LOG-2126', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'R&D',             category:'R&D Support',     title:'R&D component sourcing',                   hours: 8, date:'2025-05-20', week:'W21', notes:'' },
+  { id:'LOG-2127', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Customer Success', category:'CS Support',      title:'CS customer support sessions',              hours: 8, date:'2025-05-22', week:'W21', notes:'' },
+  { id:'LOG-2128', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Product',         category:'Product Support', title:'Product materials preparation',             hours: 7, date:'2025-05-20', week:'W21', notes:'' },
+  // === W20 (May 12 – 18) ===
+  { id:'LOG-2021', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'R&D Support',     title:'R&D weekly component support',             hours:18, date:'2025-05-15', week:'W20', notes:'' },
+  { id:'LOG-2022', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Logistics',       title:'Defence shipment support',                 hours:12, date:'2025-05-14', week:'W20', notes:'' },
+  { id:'LOG-2023', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Product enablement support',               hours:14, date:'2025-05-15', week:'W20', notes:'' },
+  { id:'LOG-2024', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Finance',         category:'Finance Support', title:'Finance coordination',                      hours:12, date:'2025-05-13', week:'W20', notes:'' },
+  { id:'LOG-2025', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'R&D',             category:'R&D Support',     title:'R&D lab support',                          hours: 9, date:'2025-05-15', week:'W20', notes:'' },
+  // === W19 (May 5 – 11) ===
+  { id:'LOG-1921', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'Procurement',     title:'R&D emergency procurement',                hours:16, date:'2025-05-08', week:'W19', notes:'' },
+  { id:'LOG-1922', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Customer Success', category:'CS Support',      title:'CS deployment support',                     hours:12, date:'2025-05-07', week:'W19', notes:'' },
+  { id:'LOG-1923', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Defence',         category:'Procurement',     title:'Defence materials procurement',             hours:14, date:'2025-05-08', week:'W19', notes:'' },
+  { id:'LOG-1924', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Finance',         category:'Finance Support', title:'Finance payment coordination',              hours:10, date:'2025-05-06', week:'W19', notes:'' },
+  // === W18 (Apr 28 – May 4) ===
+  { id:'LOG-1821', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'R&D Support',     title:'R&D engineering support',                  hours:18, date:'2025-05-01', week:'W18', notes:'' },
+  { id:'LOG-1822', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Product',         category:'Product Support', title:'Product ops support',                      hours:14, date:'2025-04-30', week:'W18', notes:'' },
+  { id:'LOG-1823', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Customer Success', category:'CS Support',      title:'CS customer coordination',                  hours:13, date:'2025-05-01', week:'W18', notes:'' },
+  // === W17 (Apr 21 – 27) ===
+  { id:'LOG-1721', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'R&D Support',     title:'Q2 R&D support kickoff',                   hours:20, date:'2025-04-24', week:'W17', notes:'' },
+  { id:'LOG-1722', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Defence Q2 procurement',                   hours:16, date:'2025-04-23', week:'W17', notes:'' },
+  { id:'LOG-1723', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Product Q2 enablement',                    hours:14, date:'2025-04-24', week:'W17', notes:'' },
+  // === W16 (Apr 14 – 20) ===
+  { id:'LOG-1621', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Finance',         category:'Finance Support', title:'Q2 finance payment setup',                 hours:18, date:'2025-04-17', week:'W16', notes:'' },
+  { id:'LOG-1622', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'R&D',             category:'R&D Support',     title:'R&D lab support session',                  hours:14, date:'2025-04-16', week:'W16', notes:'' },
+  { id:'LOG-1623', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Customer Success', category:'CS Support',      title:'CS onboarding support',                     hours:14, date:'2025-04-17', week:'W16', notes:'' },
+  // === W15 (Apr 7 – 13) ===
+  { id:'LOG-1521', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'Procurement',     title:'R&D component sourcing – Apr',             hours:22, date:'2025-04-10', week:'W15', notes:'' },
+  { id:'LOG-1522', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Defence',         category:'Procurement',     title:'Defence procurement – Apr',                hours:16, date:'2025-04-09', week:'W15', notes:'' },
+  // === W14 (Mar 31 – Apr 6) ===
+  { id:'LOG-1421', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'R&D',             category:'R&D Support',     title:'Q2 kickoff R&D support',                   hours:18, date:'2025-04-03', week:'W14', notes:'' },
+  { id:'LOG-1422', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Product',         category:'Product Support', title:'Product ops enablement',                   hours:16, date:'2025-04-02', week:'W14', notes:'' },
+  // === W13 (Mar 24 – 30) ===
+  { id:'LOG-1321', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'R&D Support',     title:'Q2 R&D preparation support',               hours:18, date:'2025-04-01', week:'W13', notes:'' },
+  { id:'LOG-1322', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Q2 Defence prep procurement',              hours:14, date:'2025-04-01', week:'W13', notes:'' },
+  { id:'LOG-1323', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Q2 Product support',                       hours:14, date:'2025-04-01', week:'W13', notes:'' },
+];
