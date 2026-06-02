@@ -279,10 +279,41 @@ function MyTasks({ period }: { period: Period }) {
   );
 }
 
-function MemberTaskGroup({ title, tasks }: { title: string; tasks: Task[] }) {
+const CATEGORY_CONTRIBUTION: Record<string, (n: number) => string> = {
+  Logistics:   n => `${n} shipment${n !== 1 ? 's' : ''} released`,
+  Procurement: n => `${n} procurement action${n !== 1 ? 's' : ''} completed`,
+  Deployments: n => `${n} installation${n !== 1 ? 's' : ''} advanced`,
+  Inventory:   n => `${n} inventory update${n !== 1 ? 's' : ''} done`,
+  Finance:     n => `${n} payment${n !== 1 ? 's' : ''} processed`,
+  Projects:    n => `${n} milestone${n !== 1 ? 's' : ''} reached`,
+  Operations:  n => `${n} task${n !== 1 ? 's' : ''} completed`,
+  Support:     n => `${n} support session${n !== 1 ? 's' : ''} delivered`,
+};
+
+function getContributionLines(tasks: Task[]): string[] {
+  const completed = tasks.filter(t => t.status === 'completed');
+  if (completed.length > 0) {
+    const byCategory = completed.reduce<Record<string, number>>((acc, t) => {
+      acc[t.category] = (acc[t.category] || 0) + 1;
+      return acc;
+    }, {});
+    return Object.entries(byCategory)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([cat, count]) => {
+        const fn = CATEGORY_CONTRIBUTION[cat];
+        return fn ? fn(count) : `${count} ${cat.toLowerCase()} task${count !== 1 ? 's' : ''} completed`;
+      });
+  }
+  const inProgress = tasks.filter(t => t.status === 'in-progress');
+  if (inProgress.length > 0) return [`${inProgress.length} task${inProgress.length !== 1 ? 's' : ''} in progress`];
+  return [];
+}
+
+function MemberTaskGroup({ title, tasks, muted }: { title: string; tasks: Task[]; muted?: boolean }) {
   if (tasks.length === 0) return null;
   return (
-    <div className="member-task-group">
+    <div className={`member-task-group${muted ? ' member-task-group-muted' : ''}`}>
       <div className="task-section-header">
         <span className="task-section-title">{title}</span>
         <span className="task-count">{tasks.length}</span>
@@ -338,11 +369,8 @@ function TeamMemberPanel({ memberName, period, onClose }: {
         <div className="panel-header">
           <div>
             <h3>{memberName}</h3>
-            <div className="small" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-              <span>{tasks.length} task{tasks.length !== 1 ? 's' : ''} · {timeRangeData[period].label}</span>
-              {overdue.length > 0 && (
-                <span className="pill pill-red">{overdue.length} overdue</span>
-              )}
+            <div className="small" style={{ marginTop: 4 }}>
+              {completed.length > 0 ? `${completed.length} completed · ` : ''}{tasks.length} total · {timeRangeData[period].label}
             </div>
           </div>
           <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
@@ -355,10 +383,10 @@ function TeamMemberPanel({ memberName, period, onClose }: {
             </div>
           ) : (
             <>
-              <MemberTaskGroup title="Overdue"     tasks={overdue} />
+              <MemberTaskGroup title="Completed"   tasks={completed} />
               <MemberTaskGroup title="In Progress" tasks={inProgress} />
               <MemberTaskGroup title="Open"        tasks={open} />
-              <MemberTaskGroup title="Completed"   tasks={completed} />
+              <MemberTaskGroup title="Overdue"     tasks={overdue} muted />
             </>
           )}
         </div>
@@ -387,16 +415,22 @@ function Executive({ period }: { period: Period }) {
         <div className="card">
           <h2 className="section-title">Team Last Updates</h2>
           <div className="team-pulse-list">
-            {teamPulseStatus.filter(m => m.submitted).map(m => (
-              <div key={m.name} className="team-pulse-item">
-                <span className="pulse-check">✓</span>
-                <span className="pulse-name">{m.name}</span>
-                <span className="small" style={{ color: 'var(--color-muted)' }}>{m.lastUpdated}</span>
-                <button className="last-updates-btn" onClick={() => openMember(m.name)}>
-                  Last Updates ↗
-                </button>
-              </div>
-            ))}
+            {teamPulseStatus.filter(m => m.submitted).map(m => {
+              const memberTasks = allTasks[period].filter(t => t.owner === m.name);
+              const lines = getContributionLines(memberTasks);
+              return (
+                <div key={m.name} className="team-pulse-item">
+                  <span className="pulse-check">✓</span>
+                  <div className="pulse-info">
+                    <div className="pulse-name">{m.name}</div>
+                    {lines.length > 0 && <div className="pulse-summary">{lines.join(' · ')}</div>}
+                  </div>
+                  <button className="last-updates-btn" onClick={() => openMember(m.name)}>
+                    Last Updates ↗
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </div>
 
