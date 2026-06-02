@@ -2,10 +2,26 @@
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
-  KPIRecord, Period, SupportLog, TeamMember,
+  ACTIVITY_CATEGORIES, KPIRecord, Period, SupportLog, TeamMember,
   filterLogsByPeriod, kpiRecords, seedSupportLogs,
   teamMembers, teamPulseStatus, timeRangeData,
 } from './data/mock';
+
+// ─── localStorage persistence ──────────────────────────────────────────────
+// Only user-submitted logs are persisted; seed data is always loaded from code.
+const USER_LOGS_KEY = 'opspulse-user-logs';
+
+function loadUserLogs(): SupportLog[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(USER_LOGS_KEY);
+    return raw ? (JSON.parse(raw) as SupportLog[]) : [];
+  } catch { return []; }
+}
+
+function persistUserLogs(logs: SupportLog[]): void {
+  try { localStorage.setItem(USER_LOGS_KEY, JSON.stringify(logs)); } catch { /* silent */ }
+}
 
 const pages = [
   'Executive Dashboard', 'Team Contributions', 'Logistics', 'Procurement',
@@ -661,7 +677,7 @@ function ActivityFeed({ period, supportLogs }: { period: Period; supportLogs: Su
 function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
   const [employeeId,  setEmployeeId]  = useState('');
   const [department,  setDepartment]  = useState('R&D');
-  const [category,    setCategory]    = useState('Procurement');
+  const [category,    setCategory]    = useState<string>(ACTIVITY_CATEGORIES[0]);
   const [title,       setTitle]       = useState('');
   const [hours,       setHours]       = useState('');
   const [date,        setDate]        = useState(new Date().toISOString().slice(0, 10));
@@ -702,11 +718,17 @@ function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
         <h2 className="section-title">Log Contribution</h2>
         <div className="grid two">
           <div>
+            {/*
+              auth-note: once login is added, employeeId will be set from session
+              and this field will be auto-filled + locked for regular users.
+              Admins/managers may retain the ability to log on behalf of others.
+            */}
             <div className="kpi-label">Employee *</div>
             <select className="input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
               <option value="">— Select employee —</option>
               {teamMembers.map(m => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
             </select>
+            <div className="form-note">For now, select the employee manually. This will be auto-filled after login is added.</div>
           </div>
           <div>
             <div className="kpi-label">Department Supported *</div>
@@ -715,9 +737,9 @@ function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
             </select>
           </div>
           <div>
-            <div className="kpi-label">Activity Category</div>
+            <div className="kpi-label">Activity Type / Category</div>
             <select className="input" value={category} onChange={e => setCategory(e.target.value)}>
-              {['Procurement','Logistics','Deployments','Finance Support','R&D Support','Product Support','CS Support','Defence Support','Operations'].map(c => <option key={c}>{c}</option>)}
+              {ACTIVITY_CATEGORIES.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
           <div>
@@ -766,11 +788,30 @@ function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
 // ─── App ───────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [page, setPage]           = useState('Executive Dashboard');
-  const [period, setPeriod]       = useState<Period>('weekly');
-  const [supportLogs, setSupportLogs] = useState<SupportLog[]>(seedSupportLogs);
+  const [page, setPage]     = useState('Executive Dashboard');
+  const [period, setPeriod] = useState<Period>('weekly');
 
-  const addLog = (log: SupportLog) => setSupportLogs(prev => [log, ...prev]);
+  // userLogs: only user-submitted entries (persisted to localStorage).
+  // Starts empty; populated from localStorage after hydration.
+  const [userLogs, setUserLogs] = useState<SupportLog[]>([]);
+
+  useEffect(() => {
+    const saved = loadUserLogs();
+    if (saved.length > 0) setUserLogs(saved);
+  }, []);
+
+  // Derive the full log array: user submissions (newest first) + seed data.
+  // All pages read from supportLogs, so every dashboard stays in sync automatically.
+  const supportLogs = [...userLogs, ...seedSupportLogs];
+
+  const addLog = (log: SupportLog) => {
+    setUserLogs(prev => {
+      const updated = [log, ...prev];
+      persistUserLogs(updated);
+      return updated;
+    });
+  };
+
   const data = timeRangeData[period];
 
   let content = <Executive period={period} supportLogs={supportLogs} />;

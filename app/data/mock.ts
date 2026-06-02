@@ -624,3 +624,19 @@ export const seedSupportLogs: SupportLog[] = [
   { id:'LOG-1322', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Q2 Defence prep procurement',              hours:14, date:'2025-04-01', week:'W13', notes:'' },
   { id:'LOG-1323', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Q2 Product support',                       hours:14, date:'2025-04-01', week:'W13', notes:'' },
 ];
+
+// Predefined activity categories — single source of truth for both the form and future analytics
+export const ACTIVITY_CATEGORIES = [
+  'Logistics',
+  'Procurement',
+  'Deployment',
+  'Installation',
+  'Finance Support',
+  'R&D Support',
+  'Product Support',
+  'Customer Support',
+  'Defense Support',
+  'Operations Support',
+] as const;
+
+export type ActivityCategory = typeof ACTIVITY_CATEGORIES[number];

@@ -98,6 +98,7 @@ a { color: inherit; text-decoration: none; }
 /* Form inputs */
 .input { width: 100%; background: rgba(255,255,255,.06); border: 1px solid var(--color-border); border-radius: 10px; padding: 10px 14px; color: #e8eef7; font-size: 14px; margin-top: 6px; font-family: inherit; resize: vertical; }
 .input:focus { outline: none; border-color: var(--color-accent); }
+.form-note { font-size: 11px; color: var(--color-muted); margin-top: 5px; font-style: italic; opacity: .8; }
 .save-button { margin-top: 20px; background: var(--color-accent); color: #fff; border: none; border-radius: 12px; padding: 11px 24px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
 .save-button:hover { opacity: .88; }
 
