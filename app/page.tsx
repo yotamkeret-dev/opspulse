@@ -6,9 +6,14 @@ import {
   filterLogsByPeriod, kpiRecords, seedSupportLogs,
   teamMembers, teamPulseStatus, timeRangeData,
 } from './data/mock';
+import { createClient } from '@/lib/supabase/client';
 
-// ─── localStorage persistence ──────────────────────────────────────────────
-// Only user-submitted logs are persisted; seed data is always loaded from code.
+// ─── Mode flag ─────────────────────────────────────────────────────────────
+// DEMO_MODE=true  → seed data + localStorage, no auth required (default when env var absent)
+// DEMO_MODE=false → Supabase DB + email authentication enforced by middleware
+const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE !== 'false';
+
+// ─── localStorage persistence (Demo Mode only) ─────────────────────────────
 const USER_LOGS_KEY = 'opspulse-user-logs';
 
 function loadUserLogs(): SupportLog[] {
@@ -21,6 +26,56 @@ function loadUserLogs(): SupportLog[] {
 
 function persistUserLogs(logs: SupportLog[]): void {
   try { localStorage.setItem(USER_LOGS_KEY, JSON.stringify(logs)); } catch { /* silent */ }
+}
+
+// ─── Supabase helpers (Production Mode only) ───────────────────────────────
+// Maps DB snake_case rows to our SupportLog camelCase type.
+function rowToLog(row: Record<string, unknown>): SupportLog {
+  return {
+    id:           String(row.id),
+    employeeId:   String(row.employee_id),
+    employeeName: String(row.employee_name),
+    department:   String(row.department),
+    category:     String(row.category),
+    title:        String(row.title),
+    hours:        Number(row.hours),
+    date:         String(row.date),
+    week:         String(row.week),
+    notes:        String(row.notes ?? ''),
+  };
+}
+
+async function fetchLogsFromDB(): Promise<SupportLog[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('support_logs')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchLogs:', error.message); return []; }
+  return (data ?? []).map(rowToLog);
+}
+
+async function insertLogToDB(
+  log: SupportLog,
+  userId: string,
+  userEmail: string
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('support_logs').insert({
+    id:             log.id,
+    employee_id:    log.employeeId,
+    employee_name:  log.employeeName,
+    employee_email: userEmail,
+    department:     log.department,
+    category:       log.category,
+    title:          log.title,
+    hours:          log.hours,
+    date:           log.date,
+    week:           log.week,
+    notes:          log.notes,
+    created_by:     userId,
+  });
+  if (error) throw new Error(error.message);
 }
 
 const pages = [
@@ -95,9 +150,11 @@ function TimeFilter({ period, setPeriod }: { period: Period; setPeriod: (p: Peri
   );
 }
 
-function Shell({ page, setPage, period, setPeriod, children }: {
+function Shell({ page, setPage, period, setPeriod, authEmail, onSignOut, children }: {
   page: string; setPage: (p: string) => void;
   period: Period; setPeriod: (p: Period) => void;
+  authEmail?: string;
+  onSignOut?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -124,6 +181,13 @@ function Shell({ page, setPage, period, setPeriod, children }: {
           <div className="topbar-right">
             <TimeFilter period={period} setPeriod={setPeriod} />
             <span className="badge">{timeRangeData[period].label}</span>
+            {DEMO_MODE && <span className="badge badge-demo">Demo</span>}
+            {!DEMO_MODE && authEmail && (
+              <div className="auth-user">
+                <span className="small auth-email">{authEmail}</span>
+                <button className="signout-btn" onClick={onSignOut}>Sign out</button>
+              </div>
+            )}
           </div>
         </div>
         {children}
@@ -791,26 +855,74 @@ export default function App() {
   const [page, setPage]     = useState('Executive Dashboard');
   const [period, setPeriod] = useState<Period>('weekly');
 
-  // userLogs: only user-submitted entries (persisted to localStorage).
-  // Starts empty; populated from localStorage after hydration.
+  // ── Demo Mode state ──────────────────────────────────────────────────────
   const [userLogs, setUserLogs] = useState<SupportLog[]>([]);
 
+  // ── Production Mode state ────────────────────────────────────────────────
+  const [dbLogs,    setDbLogs]    = useState<SupportLog[]>([]);
+  const [authUser,  setAuthUser]  = useState<{ id: string; email: string } | null>(null);
+  const [dbLoading, setDbLoading] = useState(!DEMO_MODE);
+
+  // ── Bootstrap ────────────────────────────────────────────────────────────
   useEffect(() => {
-    const saved = loadUserLogs();
-    if (saved.length > 0) setUserLogs(saved);
+    if (DEMO_MODE) {
+      const saved = loadUserLogs();
+      if (saved.length > 0) setUserLogs(saved);
+    } else {
+      // Verify session (middleware already redirects if no session)
+      const supabase = createClient();
+      supabase.auth.getUser().then(async ({ data: { user } }) => {
+        if (user) {
+          setAuthUser({ id: user.id, email: user.email ?? '' });
+          const logs = await fetchLogsFromDB();
+          setDbLogs(logs);
+        }
+        setDbLoading(false);
+      });
+    }
   }, []);
 
-  // Derive the full log array: user submissions (newest first) + seed data.
-  // All pages read from supportLogs, so every dashboard stays in sync automatically.
-  const supportLogs = [...userLogs, ...seedSupportLogs];
+  // ── Derived log array ─────────────────────────────────────────────────────
+  // Demo  → localStorage submissions + seed data
+  // Prod  → only real DB records (seed data hidden)
+  const supportLogs: SupportLog[] = DEMO_MODE
+    ? [...userLogs, ...seedSupportLogs]
+    : dbLogs;
 
-  const addLog = (log: SupportLog) => {
-    setUserLogs(prev => {
-      const updated = [log, ...prev];
-      persistUserLogs(updated);
-      return updated;
-    });
+  // ── Add log ───────────────────────────────────────────────────────────────
+  const addLog = async (log: SupportLog) => {
+    if (DEMO_MODE) {
+      setUserLogs(prev => {
+        const updated = [log, ...prev];
+        persistUserLogs(updated);
+        return updated;
+      });
+    } else {
+      try {
+        await insertLogToDB(log, authUser!.id, authUser!.email);
+        setDbLogs(prev => [log, ...prev]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        alert(`Failed to save activity: ${msg}`);
+      }
+    }
   };
+
+  // ── Sign out ──────────────────────────────────────────────────────────────
+  const signOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = '/login';
+  };
+
+  // ── Loading screen (production only, first paint) ─────────────────────────
+  if (dbLoading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#07111f', color: '#8fa3bb', fontFamily: 'Inter, sans-serif', fontSize: 14 }}>
+        Loading OpsPulse…
+      </div>
+    );
+  }
 
   const data = timeRangeData[period];
 
@@ -824,5 +936,14 @@ export default function App() {
   if (page === 'Activity Feed')                content = <ActivityFeed period={period} supportLogs={supportLogs} />;
   if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} />;
 
-  return <Shell page={page} setPage={setPage} period={period} setPeriod={setPeriod}>{content}</Shell>;
+  return (
+    <Shell
+      page={page} setPage={setPage}
+      period={period} setPeriod={setPeriod}
+      authEmail={authUser?.email}
+      onSignOut={signOut}
+    >
+      {content}
+    </Shell>
+  );
 }
