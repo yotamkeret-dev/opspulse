@@ -1,82 +1,243 @@
-export const kpis = [
-  { label: 'Systems Delivered', value: '32', note: 'Full systems, replacements and upgrades' },
-  { label: 'Installations Completed', value: '11', note: 'Salesforce source' },
-  { label: 'PO Created', value: '74', note: 'Oracle source' },
-  { label: 'Cross-Team Support Hours', value: '126h', note: 'R&D, Defence, Product, Finance and CS' },
-  { label: 'Procurement Activity', value: '$284K', note: 'Supplier payments and purchase activity' },
-  { label: 'Activities Completed', value: '148', note: 'Weekly operational throughput' },
-  { label: 'Projects Advanced', value: '6', note: 'Strategic initiatives moved forward' },
-  { label: 'Executive Highlights', value: '9', note: 'Key wins for leadership review' }
-];
+export type Period = 'weekly' | 'monthly' | 'quarterly';
 
-export const activityByCategory = [
-  { name: 'Logistics', value: 32 },
-  { name: 'Procurement', value: 41 },
-  { name: 'Deployments', value: 18 },
-  { name: 'Inventory', value: 24 },
-  { name: 'Cross-Team Support', value: 29 }
-];
+export const timeRangeData = {
+  weekly: {
+    label: 'W22 · May 26 – Jun 1',
+    kpis: [
+      { label: 'Systems Shipped', value: '32', note: 'Full systems, replacements and upgrades', priority: 1 },
+      { label: 'Delayed Shipments', value: '3', note: 'Require immediate attention', priority: 1 },
+      { label: 'PO Created', value: '74', note: 'Oracle source', priority: 1 },
+      { label: 'Installations Completed', value: '11', note: 'Salesforce source', priority: 2 },
+      { label: 'Cross-Team Support Hours', value: '126h', note: 'R&D, Defence, Product, Finance and CS', priority: 2 },
+      { label: 'Procurement Activity', value: '$284K', note: 'Supplier payments and purchase activity', priority: 2 },
+      { label: 'Activities Completed', value: '148', note: 'Weekly operational throughput', priority: 3 },
+      { label: 'Projects Advanced', value: '6', note: 'Strategic initiatives moved forward', priority: 3 },
+    ],
+    supportByDept: [
+      { name: 'R&D', hours: 42 },
+      { name: 'Defence', hours: 31 },
+      { name: 'Product', hours: 22 },
+      { name: 'Finance', hours: 18 },
+      { name: 'CS', hours: 13 },
+    ],
+    logistics: [
+      { metric: 'Systems Shipped', value: '32', detail: 'Full systems, replacements and upgrades' },
+      { metric: 'Ready to Ship at BAZ', value: '14', detail: 'Packed and awaiting final release' },
+      { metric: 'Customs Clearance', value: '7', detail: 'Shipments currently in active clearance' },
+      { metric: 'Spare Parts Sent', value: '46', detail: 'Screens, switches, computers and service kits' },
+      { metric: 'Systems In Assembly', value: '11', detail: 'Currently being prepared at workshop' },
+      { metric: 'Pending Deliveries', value: '8', detail: 'Awaiting customer confirmation or slot' },
+      { metric: 'Delayed Shipments', value: '3', detail: 'Behind schedule — action required', alert: true },
+    ],
+    procurement: [
+      { metric: 'PO Created', value: '74', detail: 'Oracle purchase orders created this week' },
+      { metric: 'Emergency Requests', value: '19', detail: 'Short-notice requests for R&D, Defence and Product' },
+      { metric: 'Supplier Payments', value: '$284K', detail: 'Processed together with Finance' },
+      { metric: 'Estimated Cost Savings', value: '$18.5K', detail: 'Negotiation, supplier alternatives and bulk planning' },
+    ],
+    deployments: [
+      { metric: 'Installations Completed', value: '11', detail: 'Completed end-to-end' },
+      { metric: 'Maintenance Activities', value: '16', detail: 'Ad-hoc and planned customer work' },
+      { metric: 'Customer Kickoffs', value: '5', detail: 'New customers and expansion activity' },
+      { metric: 'Trainings Delivered', value: '8', detail: 'Internal and external onboarding' },
+    ],
+    activityByCategory: [
+      { name: 'Logistics', value: 32 },
+      { name: 'Procurement', value: 41 },
+      { name: 'Deployments', value: 18 },
+      { name: 'Inventory', value: 24 },
+      { name: 'Cross-Team', value: 29 },
+    ],
+    trend: [
+      { week: 'W18', activities: 96 },
+      { week: 'W19', activities: 114 },
+      { week: 'W20', activities: 102 },
+      { week: 'W21', activities: 137 },
+      { week: 'W22', activities: 148 },
+    ],
+    highlights: [
+      { title: 'Defence shipment completed', text: 'Urgent procurement, packing coordination and shipment release completed within the same week.', tag: 'Defence' },
+      { title: 'MSC installation milestone', text: 'Customer readiness, technician scheduling and installation coordination completed end-to-end.', tag: 'Deployments' },
+      { title: 'Critical supplier payment released', text: 'Finance and Operations aligned to release a critical supplier payment and protect delivery timelines.', tag: 'Finance' },
+      { title: 'BAZ systems shipment-ready', text: 'Multiple systems were prepared, packed and released from BAZ for customer delivery.', tag: 'Logistics' },
+      { title: 'Emergency R&D request supported', text: 'Short-notice components sourced, purchased and delivered to keep an internal project moving.', tag: 'R&D' },
+      { title: 'Oracle inventory cleanup completed', text: 'BAZ inventory report reviewed and aligned with Oracle records to improve stock visibility.', tag: 'Inventory' },
+    ],
+    feed: [
+      { date: 'Mon', title: '4 systems released from BAZ', area: 'Logistics', detail: 'Systems packed and moved into shipment-ready status.', owner: 'Yotam Keret', status: 'completed' },
+      { date: 'Tue', title: 'Emergency R&D procurement closed', area: 'Procurement', detail: 'Supplier sourced, PO created and ETA secured.', owner: 'Dan Cohen', status: 'completed' },
+      { date: 'Wed', title: 'MSC deployment coordination', area: 'Deployments', detail: 'Customer readiness and technician schedule confirmed.', owner: 'Amit Levy', status: 'completed' },
+      { date: 'Thu', title: 'Inventory reconciliation', area: 'Inventory', detail: 'BAZ report aligned with Oracle inventory records.', owner: 'Noa Shaked', status: 'completed' },
+      { date: 'Fri', title: 'Supplier payment risk removed', area: 'Finance', detail: 'Critical supplier payment released before it could delay delivery.', owner: 'Yotam Keret', status: 'completed' },
+    ],
+    exceptions: [
+      { type: 'delayed', count: 3, label: 'Delayed shipments', section: 'Logistics' },
+      { type: 'overdue', count: 5, label: 'Overdue tasks', section: 'Activity Feed' },
+      { type: 'customs', count: 1, label: 'Customs clearance issue', section: 'Logistics' },
+      { type: 'waiting', count: 3, label: 'Systems awaiting shipment', section: 'Logistics' },
+    ],
+  },
 
-export const supportByDept = [
-  { name: 'R&D', hours: 42 },
-  { name: 'Defence', hours: 31 },
-  { name: 'Product', hours: 22 },
-  { name: 'Finance', hours: 18 },
-  { name: 'CS', hours: 13 }
-];
+  monthly: {
+    label: 'May 2025',
+    kpis: [
+      { label: 'Systems Shipped', value: '127', note: 'Full systems, replacements and upgrades', priority: 1 },
+      { label: 'Delayed Shipments', value: '5', note: 'Require immediate attention', priority: 1 },
+      { label: 'PO Created', value: '298', note: 'Oracle source', priority: 1 },
+      { label: 'Installations Completed', value: '43', note: 'Salesforce source', priority: 2 },
+      { label: 'Cross-Team Support Hours', value: '498h', note: 'R&D, Defence, Product, Finance and CS', priority: 2 },
+      { label: 'Procurement Activity', value: '$1.1M', note: 'Supplier payments and purchase activity', priority: 2 },
+      { label: 'Activities Completed', value: '586', note: 'Monthly operational throughput', priority: 3 },
+      { label: 'Projects Advanced', value: '24', note: 'Strategic initiatives moved forward', priority: 3 },
+    ],
+    supportByDept: [
+      { name: 'R&D', hours: 168 },
+      { name: 'Defence', hours: 124 },
+      { name: 'Product', hours: 88 },
+      { name: 'Finance', hours: 72 },
+      { name: 'CS', hours: 46 },
+    ],
+    logistics: [
+      { metric: 'Systems Shipped', value: '127', detail: 'Full systems, replacements and upgrades' },
+      { metric: 'Ready to Ship at BAZ', value: '22', detail: 'Packed and awaiting final release' },
+      { metric: 'Customs Clearance', value: '12', detail: 'Shipments currently in active clearance' },
+      { metric: 'Spare Parts Sent', value: '184', detail: 'Screens, switches, computers and service kits' },
+      { metric: 'Systems In Assembly', value: '18', detail: 'Currently being prepared at workshop' },
+      { metric: 'Pending Deliveries', value: '14', detail: 'Awaiting customer confirmation or slot' },
+      { metric: 'Delayed Shipments', value: '5', detail: 'Behind schedule — action required', alert: true },
+    ],
+    procurement: [
+      { metric: 'PO Created', value: '298', detail: 'Oracle purchase orders created this month' },
+      { metric: 'Emergency Requests', value: '74', detail: 'Short-notice requests for R&D, Defence and Product' },
+      { metric: 'Supplier Payments', value: '$1.1M', detail: 'Processed together with Finance' },
+      { metric: 'Estimated Cost Savings', value: '$76K', detail: 'Negotiation, supplier alternatives and bulk planning' },
+    ],
+    deployments: [
+      { metric: 'Installations Completed', value: '43', detail: 'Completed end-to-end' },
+      { metric: 'Maintenance Activities', value: '62', detail: 'Ad-hoc and planned customer work' },
+      { metric: 'Customer Kickoffs', value: '18', detail: 'New customers and expansion activity' },
+      { metric: 'Trainings Delivered', value: '31', detail: 'Internal and external onboarding' },
+    ],
+    activityByCategory: [
+      { name: 'Logistics', value: 128 },
+      { name: 'Procurement', value: 164 },
+      { name: 'Deployments', value: 72 },
+      { name: 'Inventory', value: 96 },
+      { name: 'Cross-Team', value: 116 },
+    ],
+    trend: [
+      { week: 'Jan', activities: 412 },
+      { week: 'Feb', activities: 487 },
+      { week: 'Mar', activities: 531 },
+      { week: 'Apr', activities: 549 },
+      { week: 'May', activities: 586 },
+    ],
+    highlights: [
+      { title: 'Q2 procurement milestone reached', text: 'Operations processed over 1,000 POs in Q2, exceeding the quarterly target by 12%.', tag: 'Procurement' },
+      { title: 'MSC full site deployment', text: 'Customer site fully deployed with 3 systems, training completed and handover signed.', tag: 'Deployments' },
+      { title: 'BAZ clearance backlog resolved', text: 'All customs-held shipments cleared within the month — no outstanding cases at month end.', tag: 'Logistics' },
+      { title: 'R&D support streak', text: 'Operations supported R&D every week of the month — 168 hours of direct engineering support.', tag: 'R&D' },
+      { title: 'Supplier payment SLA achieved', text: 'All supplier payments processed within agreed payment windows for the full month.', tag: 'Finance' },
+      { title: 'Inventory accuracy improved', text: 'BAZ stock accuracy improved from 87% to 96% after Oracle reconciliation project.', tag: 'Inventory' },
+    ],
+    feed: [
+      { date: 'May 5', title: '12 systems shipped in single week', area: 'Logistics', detail: 'Largest single-week shipment volume of the quarter.', owner: 'Yotam Keret', status: 'completed' },
+      { date: 'May 9', title: 'Emergency procurement: defence project', area: 'Procurement', detail: '7 emergency POs closed within 48 hours.', owner: 'Dan Cohen', status: 'completed' },
+      { date: 'May 14', title: 'MSC site deployment completed', area: 'Deployments', detail: '3 systems installed, training delivered, handover signed.', owner: 'Amit Levy', status: 'completed' },
+      { date: 'May 19', title: 'Customs backlog cleared', area: 'Logistics', detail: 'All 8 pending customs cases resolved.', owner: 'Noa Shaked', status: 'completed' },
+      { date: 'May 26', title: 'Month-end supplier payments', area: 'Finance', detail: '$1.1M in supplier payments processed on schedule.', owner: 'Yotam Keret', status: 'completed' },
+    ],
+    exceptions: [
+      { type: 'delayed', count: 5, label: 'Delayed shipments', section: 'Logistics' },
+      { type: 'overdue', count: 8, label: 'Overdue tasks', section: 'Activity Feed' },
+      { type: 'customs', count: 2, label: 'Customs clearance issues', section: 'Logistics' },
+      { type: 'waiting', count: 6, label: 'Systems awaiting shipment', section: 'Logistics' },
+    ],
+  },
 
-export const trend = [
-  { week: 'W48', activities: 96 },
-  { week: 'W49', activities: 114 },
-  { week: 'W50', activities: 102 },
-  { week: 'W51', activities: 137 },
-  { week: 'W52', activities: 148 }
-];
-
-export const highlights = [
-  { title: 'Defence shipment completed', text: 'Urgent procurement, packing coordination and shipment release were completed within the same week.', tag: 'Defence' },
-  { title: 'MSC installation milestone completed', text: 'Customer readiness, technician scheduling and installation coordination were completed end-to-end.', tag: 'Deployments' },
-  { title: 'Critical supplier payment released', text: 'Finance and Operations aligned to release a critical supplier payment and protect delivery timelines.', tag: 'Finance' },
-  { title: 'BAZ systems moved to shipment-ready status', text: 'Multiple systems were prepared, packed and released from BAZ for customer delivery.', tag: 'Logistics' },
-  { title: 'Emergency R&D request supported', text: 'Short-notice components were sourced, purchased and delivered to keep an internal project moving.', tag: 'R&D' },
-  { title: 'Oracle inventory cleanup completed', text: 'BAZ inventory report was reviewed and aligned with Oracle records to improve stock visibility.', tag: 'Inventory' }
-];
-
-export const logistics = [
-  { metric: 'Systems Shipped', value: '32', detail: 'Full systems, replacements and upgrades' },
-  { metric: 'Ready to Ship at BAZ', value: '14', detail: 'Packed and awaiting final release' },
-  { metric: 'Customs Clearance', value: '7', detail: 'Shipments currently in active clearance' },
-  { metric: 'Spare Parts Sent', value: '46', detail: 'Screens, switches, computers and service kits' }
-];
-
-export const procurement = [
-  { metric: 'PO Created', value: '74', detail: 'Oracle purchase orders created this week' },
-  { metric: 'Emergency Procurement Requests', value: '19', detail: 'Short-notice requests for R&D, Defence and Product' },
-  { metric: 'Supplier Payments', value: '$284K', detail: 'Processed together with Finance' },
-  { metric: 'Estimated Cost Savings', value: '$18.5K', detail: 'Negotiation, supplier alternatives and bulk planning' }
-];
-
-export const deployments = [
-  { metric: 'Installations Completed', value: '11', detail: 'Completed end-to-end' },
-  { metric: 'Maintenance Activities', value: '16', detail: 'Ad-hoc and planned customer work' },
-  { metric: 'Customer Kickoffs', value: '5', detail: 'New customers and expansion activity' },
-  { metric: 'Trainings Delivered', value: '8', detail: 'Internal and external onboarding' }
-];
+  quarterly: {
+    label: 'Q2 2025',
+    kpis: [
+      { label: 'Systems Shipped', value: '384', note: 'Full systems, replacements and upgrades', priority: 1 },
+      { label: 'Delayed Shipments', value: '8', note: 'Require immediate attention', priority: 1 },
+      { label: 'PO Created', value: '891', note: 'Oracle source', priority: 1 },
+      { label: 'Installations Completed', value: '127', note: 'Salesforce source', priority: 2 },
+      { label: 'Cross-Team Support Hours', value: '1,496h', note: 'R&D, Defence, Product, Finance and CS', priority: 2 },
+      { label: 'Procurement Activity', value: '$3.2M', note: 'Supplier payments and purchase activity', priority: 2 },
+      { label: 'Activities Completed', value: '1,763', note: 'Quarterly operational throughput', priority: 3 },
+      { label: 'Projects Advanced', value: '71', note: 'Strategic initiatives moved forward', priority: 3 },
+    ],
+    supportByDept: [
+      { name: 'R&D', hours: 504 },
+      { name: 'Defence', hours: 372 },
+      { name: 'Product', hours: 264 },
+      { name: 'Finance', hours: 216 },
+      { name: 'CS', hours: 140 },
+    ],
+    logistics: [
+      { metric: 'Systems Shipped', value: '384', detail: 'Full systems, replacements and upgrades' },
+      { metric: 'Ready to Ship at BAZ', value: '22', detail: 'Packed and awaiting final release' },
+      { metric: 'Customs Clearance', value: '12', detail: 'Shipments currently in active clearance' },
+      { metric: 'Spare Parts Sent', value: '542', detail: 'Screens, switches, computers and service kits' },
+      { metric: 'Systems In Assembly', value: '18', detail: 'Currently being prepared at workshop' },
+      { metric: 'Pending Deliveries', value: '14', detail: 'Awaiting customer confirmation or slot' },
+      { metric: 'Delayed Shipments', value: '8', detail: 'Behind schedule — action required', alert: true },
+    ],
+    procurement: [
+      { metric: 'PO Created', value: '891', detail: 'Oracle purchase orders created this quarter' },
+      { metric: 'Emergency Requests', value: '218', detail: 'Short-notice requests for R&D, Defence and Product' },
+      { metric: 'Supplier Payments', value: '$3.2M', detail: 'Processed together with Finance' },
+      { metric: 'Estimated Cost Savings', value: '$228K', detail: 'Negotiation, supplier alternatives and bulk planning' },
+    ],
+    deployments: [
+      { metric: 'Installations Completed', value: '127', detail: 'Completed end-to-end' },
+      { metric: 'Maintenance Activities', value: '187', detail: 'Ad-hoc and planned customer work' },
+      { metric: 'Customer Kickoffs', value: '54', detail: 'New customers and expansion activity' },
+      { metric: 'Trainings Delivered', value: '94', detail: 'Internal and external onboarding' },
+    ],
+    activityByCategory: [
+      { name: 'Logistics', value: 384 },
+      { name: 'Procurement', value: 492 },
+      { name: 'Deployments', value: 216 },
+      { name: 'Inventory', value: 288 },
+      { name: 'Cross-Team', value: 348 },
+    ],
+    trend: [
+      { week: 'Q3\'24', activities: 1482 },
+      { week: 'Q4\'24', activities: 1621 },
+      { week: 'Q1\'25', activities: 1587 },
+      { week: 'Q2\'25', activities: 1763 },
+    ],
+    highlights: [
+      { title: 'Q2 record shipment volume', text: '384 systems shipped — highest quarterly volume in company history.', tag: 'Logistics' },
+      { title: 'Enterprise contract fulfilment', text: 'All Q2 committed deliveries fulfilled on time, zero SLA breaches.', tag: 'Deployments' },
+      { title: 'Procurement efficiency gains', text: 'Average PO-to-delivery time reduced from 14 days to 9 days across Q2.', tag: 'Procurement' },
+      { title: 'Cross-functional support record', text: '1,496 hours of direct department support — up 18% from Q1.', tag: 'R&D' },
+      { title: 'Supplier base expanded', text: '12 new approved suppliers added, reducing single-source dependency risks.', tag: 'Finance' },
+      { title: 'BAZ zero-loss quarter', text: 'Full inventory accuracy maintained throughout Q2 — no loss events recorded.', tag: 'Inventory' },
+    ],
+    feed: [
+      { date: 'Apr 2', title: 'Q2 operations kickoff', area: 'Operations', detail: 'Quarter plan locked, priorities aligned with leadership.', owner: 'Yotam Keret', status: 'completed' },
+      { date: 'Apr 18', title: 'Enterprise batch shipment', area: 'Logistics', detail: '28 systems shipped to 3 enterprise customers in one week.', owner: 'Dan Cohen', status: 'completed' },
+      { date: 'May 5', title: 'Procurement partner review', area: 'Procurement', detail: '8 suppliers reviewed, 3 contracts renegotiated for Q3 savings.', owner: 'Amit Levy', status: 'completed' },
+      { date: 'May 21', title: 'Regional deployment complete', area: 'Deployments', detail: '6 customer sites deployed across 3 countries.', owner: 'Noa Shaked', status: 'completed' },
+      { date: 'Jun 1', title: 'Q2 inventory close', area: 'Inventory', detail: 'BAZ full stock count completed — 96% accuracy achieved.', owner: 'Yotam Keret', status: 'completed' },
+    ],
+    exceptions: [
+      { type: 'delayed', count: 8, label: 'Delayed shipments', section: 'Logistics' },
+      { type: 'overdue', count: 12, label: 'Overdue tasks', section: 'Activity Feed' },
+      { type: 'customs', count: 3, label: 'Customs clearance issues', section: 'Logistics' },
+      { type: 'waiting', count: 9, label: 'Systems awaiting shipment', section: 'Logistics' },
+    ],
+  },
+};
 
 export const teamPulseStatus = [
-  { name: 'Yotam Keret', submitted: true },
-  { name: 'Dan Cohen', submitted: true },
-  { name: 'Amit Levy', submitted: true },
-  { name: 'Noa Shaked', submitted: true },
-  { name: 'Eliav Mizrahi', submitted: false },
-  { name: 'Liora Ben David', submitted: false },
-  { name: 'Omer Shapiro', submitted: false },
-];
-
-export const feed = [
-  { date: 'Mon', title: '4 systems released from BAZ', area: 'Logistics', detail: 'Systems packed and moved into shipment-ready status.' },
-  { date: 'Tue', title: 'Emergency R&D procurement closed', area: 'Procurement', detail: 'Supplier sourced, PO created and ETA secured.' },
-  { date: 'Wed', title: 'MSC deployment coordination completed', area: 'Deployments', detail: 'Customer readiness and technician schedule confirmed.' },
-  { date: 'Thu', title: 'Inventory reconciliation completed', area: 'Inventory', detail: 'BAZ report aligned with Oracle inventory records.' },
-  { date: 'Fri', title: 'Supplier payment risk removed', area: 'Finance', detail: 'Critical supplier payment released before it could delay delivery.' }
+  { name: 'Yotam Keret', submitted: true, lastUpdated: '2h ago' },
+  { name: 'Dan Cohen', submitted: true, lastUpdated: '4h ago' },
+  { name: 'Amit Levy', submitted: true, lastUpdated: '1d ago' },
+  { name: 'Noa Shaked', submitted: true, lastUpdated: '1d ago' },
+  { name: 'Eliav Mizrahi', submitted: false, lastUpdated: null },
+  { name: 'Liora Ben David', submitted: false, lastUpdated: null },
+  { name: 'Omer Shapiro', submitted: false, lastUpdated: null },
 ];
