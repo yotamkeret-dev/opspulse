@@ -1,23 +1,123 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Period, teamPulseStatus, timeRangeData } from './data/mock';
+import { KPIRecord, Period, kpiRecords, teamPulseStatus, timeRangeData } from './data/mock';
 
 const pages = ['Executive Dashboard', 'Logistics', 'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity'];
 
 type KPIItem = { label: string; value: string; note: string; priority: number };
 
-function KPIGrid({ items }: { items: KPIItem[] }) {
+function KPIGrid({ items, onKpiClick }: { items: KPIItem[]; onKpiClick: (item: KPIItem) => void }) {
   return (
     <div className="grid kpis">
       {items.map((item) => (
-        <div className={`card kpi-p${item.priority}`} key={item.label}>
+        <div
+          className={`card kpi-p${item.priority} kpi-clickable`}
+          key={item.label}
+          onClick={() => onKpiClick(item)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && onKpiClick(item)}
+        >
           <div className="kpi-label">{item.label}</div>
           <div className="kpi-value">{item.value}</div>
           <div className="kpi-note">{item.note}</div>
         </div>
       ))}
     </div>
+  );
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  delivered: 'status-completed',
+  completed: 'status-completed',
+  paid: 'status-completed',
+  resolved: 'status-completed',
+  approved: 'status-completed',
+  'in-progress': 'status-in-progress',
+  'in-transit': 'status-in-progress',
+  'pending-approval': 'status-in-progress',
+  pending: 'status-in-progress',
+  delayed: 'status-blocked',
+  'customs-hold': 'status-blocked',
+  'parts-missing': 'status-blocked',
+  'carrier-delay': 'status-blocked',
+};
+
+function KPIDetailPanel({ kpi, period, onClose }: { kpi: KPIItem; period: Period; onClose: () => void }) {
+  const records: KPIRecord[] = kpiRecords[kpi.label]?.[period] ?? [];
+  const periodLabel = timeRangeData[period].label;
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const counterpartyHeader = records[0]?.counterpartyType ?? 'Counterparty';
+
+  return (
+    <>
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{kpi.label}</h3>
+            <div className="small">{records.length} record{records.length !== 1 ? 's' : ''} · {periodLabel}</div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="panel-body">
+          {records.length === 0 ? (
+            <div className="panel-empty">
+              <div className="panel-empty-icon">📋</div>
+              <div>No records for this period</div>
+            </div>
+          ) : (
+            <table className="record-table">
+              <thead>
+                <tr>
+                  <th>Ref</th>
+                  <th>Name</th>
+                  {records.some(r => r.counterparty) && <th>{counterpartyHeader}</th>}
+                  <th>Owner</th>
+                  <th>Status</th>
+                  <th>Priority</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((r) => (
+                  <tr key={r.id}>
+                    <td><span className="rec-id">{r.id}</span></td>
+                    <td>
+                      <div className="rec-name">{r.name}</div>
+                      {r.notes && <div className="rec-notes">{r.notes}</div>}
+                    </td>
+                    {records.some(rec => rec.counterparty) && (
+                      <td><span className="rec-counterparty">{r.counterparty ?? '—'}</span></td>
+                    )}
+                    <td>{r.owner}</td>
+                    <td>
+                      <span className={`status-badge ${STATUS_COLORS[r.status] ?? 'status-in-progress'}`}>
+                        {r.status.replace(/-/g, ' ')}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={`priority-label priority-${r.priority}`}>
+                        <span className="priority-dot" />
+                        {r.priority}
+                      </span>
+                    </td>
+                    <td><span className="small">{r.date}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -70,9 +170,11 @@ function Shell({ page, setPage, period, setPeriod, children }: {
 
 function Executive({ period }: { period: Period }) {
   const data = timeRangeData[period];
+  const [selectedKpi, setSelectedKpi] = useState<KPIItem | null>(null);
   return (
     <>
-      <KPIGrid items={data.kpis} />
+      {selectedKpi && <KPIDetailPanel kpi={selectedKpi} period={period} onClose={() => setSelectedKpi(null)} />}
+      <KPIGrid items={data.kpis} onKpiClick={setSelectedKpi} />
 
       <div className="grid two">
         <div className="card">

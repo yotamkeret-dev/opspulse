@@ -241,3 +241,271 @@ export const teamPulseStatus = [
   { name: 'Liora Ben David', submitted: false, lastUpdated: null },
   { name: 'Omer Shapiro', submitted: false, lastUpdated: null },
 ];
+
+export type KPIRecord = {
+  id: string;
+  name: string;
+  counterparty?: string;
+  counterpartyType?: 'Customer' | 'Supplier' | 'Department';
+  owner: string;
+  status: string;
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  date: string;
+  lastUpdated: string;
+  notes?: string;
+};
+
+export const kpiRecords: Record<string, Record<Period, KPIRecord[]>> = {
+
+  'Systems Shipped': {
+    weekly: [
+      { id: 'SHIP-2201', name: 'System 118 – Full Unit', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'May 27', lastUpdated: '1d ago' },
+      { id: 'SHIP-2202', name: 'System 119 – Replacement', counterparty: 'Meridian Security Corp', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'delivered', priority: 'medium', date: 'May 26', lastUpdated: '2d ago' },
+      { id: 'SHIP-2203', name: 'System 120 – Upgrade Kit', counterparty: 'Apex Operations Ltd', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'in-transit', priority: 'medium', date: 'May 28', lastUpdated: '8h ago' },
+      { id: 'SHIP-2204', name: 'System 121 + 122 – Batch (2)', counterparty: 'Centuria Intelligence', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'delivered', priority: 'high', date: 'May 25', lastUpdated: '2d ago' },
+      { id: 'SHIP-2205', name: 'System 123 – New Unit', counterparty: 'Orion Systems Group', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'SHIP-2206', name: 'System 124 – New Unit', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'customs-hold', priority: 'critical', date: 'May 24', lastUpdated: '3d ago', notes: 'Customs hold — documentation incomplete' },
+      { id: 'SHIP-2207', name: 'Systems 125–128 – Batch (4)', counterparty: 'Zenith Command', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'delivered', priority: 'high', date: 'May 27', lastUpdated: '18h ago' },
+      { id: 'SHIP-2208', name: 'Spare Parts Kit – 3 units', counterparty: 'Vanguard Tech', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'delivered', priority: 'medium', date: 'May 26', lastUpdated: '1d ago' },
+    ],
+    monthly: [
+      { id: 'SHIP-2175', name: 'System 109 + 110 – Batch (2)', counterparty: 'Stratos Security', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'May 6', lastUpdated: '3w ago' },
+      { id: 'SHIP-2179', name: 'Systems 111–113 – Batch (3)', counterparty: 'Citadel Corp', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'delivered', priority: 'high', date: 'May 9', lastUpdated: '3w ago' },
+      { id: 'SHIP-2183', name: 'System 114 – Replacement', counterparty: 'Alpha Defense Ltd', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'delivered', priority: 'medium', date: 'May 12', lastUpdated: '2w ago' },
+      { id: 'SHIP-2187', name: 'System 115 – Full Unit', counterparty: 'Beta Systems Inc', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'delivered', priority: 'high', date: 'May 14', lastUpdated: '2w ago' },
+      { id: 'SHIP-2191', name: 'Spare Parts Kit – 8 units', counterparty: 'Meridian Security Corp', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'delivered', priority: 'medium', date: 'May 19', lastUpdated: '1w ago' },
+      { id: 'SHIP-2194', name: 'Systems 116 + 117 – Batch (2)', counterparty: 'Centuria Intelligence', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'delivered', priority: 'high', date: 'May 22', lastUpdated: '6d ago' },
+      { id: 'SHIP-2201', name: 'System 118 – Full Unit', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'May 27', lastUpdated: '1d ago' },
+      { id: 'SHIP-2203', name: 'System 120 – Upgrade Kit', counterparty: 'Apex Operations Ltd', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'in-transit', priority: 'medium', date: 'May 28', lastUpdated: '8h ago' },
+      { id: 'SHIP-2206', name: 'System 124 – New Unit', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'customs-hold', priority: 'critical', date: 'May 24', lastUpdated: '3d ago', notes: 'Customs hold — documentation incomplete' },
+      { id: 'SHIP-2207', name: 'Systems 125–128 – Batch (4)', counterparty: 'Zenith Command', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'delivered', priority: 'high', date: 'May 27', lastUpdated: '18h ago' },
+    ],
+    quarterly: [
+      { id: 'SHIP-2101', name: 'Systems 82–86 – Enterprise Batch (5)', counterparty: 'Citadel Corp', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'Apr 7', lastUpdated: '8w ago' },
+      { id: 'SHIP-2110', name: 'System 87 – New Site Setup', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'delivered', priority: 'high', date: 'Apr 14', lastUpdated: '7w ago' },
+      { id: 'SHIP-2118', name: 'Systems 88–90 – Regional Batch (3)', counterparty: 'Stratos Security', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'delivered', priority: 'high', date: 'Apr 21', lastUpdated: '6w ago' },
+      { id: 'SHIP-2126', name: 'System 91 – Upgrade Kit', counterparty: 'Orion Systems Group', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'delivered', priority: 'medium', date: 'Apr 28', lastUpdated: '5w ago' },
+      { id: 'SHIP-2134', name: 'Systems 92–96 – Batch (5)', counterparty: 'Vanguard Tech', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'May 5', lastUpdated: '4w ago' },
+      { id: 'SHIP-2141', name: 'System 97 – Replacement', counterparty: 'Alpha Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'delivered', priority: 'medium', date: 'May 9', lastUpdated: '3w ago' },
+      { id: 'SHIP-2147', name: 'Systems 98–101 – Batch (4)', counterparty: 'Centuria Intelligence', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'delivered', priority: 'high', date: 'May 14', lastUpdated: '2w ago' },
+      { id: 'SHIP-2156', name: 'Systems 102–106 – Enterprise Batch (5)', counterparty: 'Citadel Corp', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'delivered', priority: 'high', date: 'May 19', lastUpdated: '1w ago' },
+      { id: 'SHIP-2194', name: 'Systems 116 + 117 – Batch (2)', counterparty: 'Beta Systems Inc', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'May 22', lastUpdated: '6d ago' },
+      { id: 'SHIP-2201', name: 'System 118 – Full Unit', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'delivered', priority: 'high', date: 'May 27', lastUpdated: '1d ago' },
+      { id: 'SHIP-2203', name: 'System 120 – Upgrade Kit', counterparty: 'Apex Operations Ltd', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'in-transit', priority: 'medium', date: 'May 28', lastUpdated: '8h ago' },
+      { id: 'SHIP-2206', name: 'System 124 – New Unit', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'customs-hold', priority: 'critical', date: 'May 24', lastUpdated: '3d ago', notes: 'Customs hold — documentation incomplete' },
+    ],
+  },
+
+  'Delayed Shipments': {
+    weekly: [
+      { id: 'DELAY-201', name: 'System 124 – Horizon Defense', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'customs-hold', priority: 'critical', date: 'Expected May 28', lastUpdated: '3d ago', notes: 'Customs documentation incomplete — legal reviewing' },
+      { id: 'DELAY-202', name: 'Spare Parts Kit – Iota Systems', counterparty: 'Iota Systems', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'carrier-delay', priority: 'high', date: 'Expected Jun 2', lastUpdated: '6h ago', notes: 'Carrier rescheduled — new ETA confirmed' },
+      { id: 'DELAY-203', name: 'System 107 – Kappa Corp', counterparty: 'Kappa Corp', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'parts-missing', priority: 'critical', date: 'Expected May 30', lastUpdated: '2d ago', notes: 'Supplier component missing — alternative sourcing in progress' },
+    ],
+    monthly: [
+      { id: 'DELAY-196', name: 'System 103 – Theta Defense', counterparty: 'Theta Defense', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'resolved', priority: 'high', date: 'Resolved May 9', lastUpdated: '3w ago', notes: 'Customs cleared after 4-day hold' },
+      { id: 'DELAY-198', name: 'Spare Parts – Epsilon Security', counterparty: 'Epsilon Security', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'resolved', priority: 'medium', date: 'Resolved May 14', lastUpdated: '2w ago', notes: 'Alternate carrier dispatched — delivered 3 days late' },
+      { id: 'DELAY-200', name: 'System 106 – Lambda Group', counterparty: 'Lambda Group', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'resolved', priority: 'high', date: 'Resolved May 21', lastUpdated: '1w ago', notes: 'Packaging issue corrected and reshipped' },
+      { id: 'DELAY-201', name: 'System 124 – Horizon Defense', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'customs-hold', priority: 'critical', date: 'Expected May 28', lastUpdated: '3d ago', notes: 'Customs documentation incomplete — legal reviewing' },
+      { id: 'DELAY-203', name: 'System 107 – Kappa Corp', counterparty: 'Kappa Corp', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'parts-missing', priority: 'critical', date: 'Expected May 30', lastUpdated: '2d ago', notes: 'Supplier component missing — alternative sourcing in progress' },
+    ],
+    quarterly: [
+      { id: 'DELAY-181', name: 'System 89 – Sigma Defense', counterparty: 'Sigma Defense', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'resolved', priority: 'high', date: 'Resolved Apr 10', lastUpdated: '7w ago', notes: 'Freight damage — replaced and reshipped' },
+      { id: 'DELAY-185', name: 'Systems 92–93 – Theta Corp', counterparty: 'Theta Corp', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'resolved', priority: 'critical', date: 'Resolved Apr 18', lastUpdated: '6w ago', notes: 'Customs cleared after compliance review' },
+      { id: 'DELAY-190', name: 'Spare Parts – Omega Systems', counterparty: 'Omega Systems', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'resolved', priority: 'medium', date: 'Resolved Apr 29', lastUpdated: '5w ago', notes: 'Supplier lead time exceeded — expedited shipping used' },
+      { id: 'DELAY-196', name: 'System 103 – Theta Defense', counterparty: 'Theta Defense', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'resolved', priority: 'high', date: 'Resolved May 9', lastUpdated: '3w ago', notes: 'Customs cleared after 4-day hold' },
+      { id: 'DELAY-198', name: 'Spare Parts – Epsilon Security', counterparty: 'Epsilon Security', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'resolved', priority: 'medium', date: 'Resolved May 14', lastUpdated: '2w ago', notes: 'Alternate carrier — delivered 3 days late' },
+      { id: 'DELAY-200', name: 'System 106 – Lambda Group', counterparty: 'Lambda Group', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'resolved', priority: 'high', date: 'Resolved May 21', lastUpdated: '1w ago', notes: 'Packaging issue corrected and reshipped' },
+      { id: 'DELAY-201', name: 'System 124 – Horizon Defense', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'customs-hold', priority: 'critical', date: 'Expected May 28', lastUpdated: '3d ago', notes: 'Customs documentation incomplete — legal reviewing' },
+      { id: 'DELAY-203', name: 'System 107 – Kappa Corp', counterparty: 'Kappa Corp', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'parts-missing', priority: 'critical', date: 'Expected May 30', lastUpdated: '2d ago', notes: 'Supplier component missing — alternative sourcing in progress' },
+    ],
+  },
+
+  'PO Created': {
+    weekly: [
+      { id: 'PO-4571', name: 'Emergency R&D components – urgent', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'critical', date: 'May 27', lastUpdated: '14h ago', notes: 'Amount: $12,400' },
+      { id: 'PO-4572', name: 'BAZ spare parts replenishment', counterparty: 'Pacific Parts Direct', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'approved', priority: 'high', date: 'May 27', lastUpdated: '16h ago', notes: 'Amount: $8,200' },
+      { id: 'PO-4573', name: 'System 120 assembly components', counterparty: 'GlobalTech Supply', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'pending-approval', priority: 'high', date: 'May 26', lastUpdated: '1d ago', notes: 'Amount: $34,000' },
+      { id: 'PO-4574', name: 'Defence project materials – Q2', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'approved', priority: 'critical', date: 'May 25', lastUpdated: '2d ago', notes: 'Amount: $56,000' },
+      { id: 'PO-4575', name: 'Inventory replenishment – screens', counterparty: 'Core Components Ltd', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'approved', priority: 'medium', date: 'May 24', lastUpdated: '3d ago', notes: 'Amount: $9,600' },
+      { id: 'PO-4576', name: 'Customer site spare kit – Frontier', counterparty: 'FastTrack Logistics', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'high', date: 'May 26', lastUpdated: '22h ago', notes: 'Amount: $14,800' },
+      { id: 'PO-4577', name: 'Product team support materials', counterparty: 'Precision Parts Co', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'approved', priority: 'high', date: 'May 27', lastUpdated: '12h ago', notes: 'Amount: $7,100' },
+      { id: 'PO-4578', name: 'Routine supplies – switches batch', counterparty: 'Allied Materials', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'pending-approval', priority: 'low', date: 'May 28', lastUpdated: '4h ago', notes: 'Amount: $4,300' },
+    ],
+    monthly: [
+      { id: 'PO-4421', name: 'Q2 R&D component framework deal', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'high', date: 'May 3', lastUpdated: '4w ago', notes: 'Amount: $86,000 — monthly framework' },
+      { id: 'PO-4438', name: 'BAZ full restocking – Q2', counterparty: 'Pacific Parts Direct', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'approved', priority: 'high', date: 'May 8', lastUpdated: '3w ago', notes: 'Amount: $42,000' },
+      { id: 'PO-4452', name: 'Defence urgent batch – 3 lines', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'approved', priority: 'critical', date: 'May 12', lastUpdated: '2w ago', notes: 'Amount: $118,000' },
+      { id: 'PO-4467', name: 'System 115–117 components', counterparty: 'GlobalTech Supply', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'approved', priority: 'high', date: 'May 16', lastUpdated: '2w ago', notes: 'Amount: $74,000' },
+      { id: 'PO-4491', name: 'Preventive maintenance kits', counterparty: 'Core Components Ltd', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'approved', priority: 'medium', date: 'May 20', lastUpdated: '1w ago', notes: 'Amount: $28,500' },
+      { id: 'PO-4510', name: 'Customer pre-ship spare kits x4', counterparty: 'FastTrack Logistics', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'high', date: 'May 23', lastUpdated: '5d ago', notes: 'Amount: $32,000' },
+      { id: 'PO-4571', name: 'Emergency R&D components – urgent', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'critical', date: 'May 27', lastUpdated: '14h ago', notes: 'Amount: $12,400' },
+      { id: 'PO-4573', name: 'System 120 assembly components', counterparty: 'GlobalTech Supply', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'pending-approval', priority: 'high', date: 'May 26', lastUpdated: '1d ago', notes: 'Amount: $34,000' },
+    ],
+    quarterly: [
+      { id: 'PO-4201', name: 'Q2 opener – framework agreement', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'approved', priority: 'high', date: 'Apr 2', lastUpdated: '9w ago', notes: 'Amount: $240,000 — quarterly framework' },
+      { id: 'PO-4225', name: 'Enterprise batch – Systems 82–90', counterparty: 'GlobalTech Supply', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'approved', priority: 'high', date: 'Apr 9', lastUpdated: '8w ago', notes: 'Amount: $310,000' },
+      { id: 'PO-4248', name: 'Defence strategic stockpile', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'approved', priority: 'critical', date: 'Apr 17', lastUpdated: '7w ago', notes: 'Amount: $198,000' },
+      { id: 'PO-4280', name: 'BAZ Q2 full inventory replenish', counterparty: 'Pacific Parts Direct', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'high', date: 'Apr 25', lastUpdated: '6w ago', notes: 'Amount: $145,000' },
+      { id: 'PO-4320', name: 'R&D quarterly component suite', counterparty: 'Core Components Ltd', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'approved', priority: 'high', date: 'May 6', lastUpdated: '4w ago', notes: 'Amount: $187,000' },
+      { id: 'PO-4452', name: 'Defence urgent batch – 3 lines', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'approved', priority: 'critical', date: 'May 12', lastUpdated: '2w ago', notes: 'Amount: $118,000' },
+      { id: 'PO-4510', name: 'Customer pre-ship spare kits x4', counterparty: 'FastTrack Logistics', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'high', date: 'May 23', lastUpdated: '5d ago', notes: 'Amount: $32,000' },
+      { id: 'PO-4571', name: 'Emergency R&D components – urgent', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'approved', priority: 'critical', date: 'May 27', lastUpdated: '14h ago', notes: 'Amount: $12,400' },
+    ],
+  },
+
+  'Installations Completed': {
+    weekly: [
+      { id: 'INST-1101', name: 'Frontier – Site Alpha, new install', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'INST-1102', name: 'Meridian – Site B expansion', counterparty: 'Meridian Security Corp', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 27', lastUpdated: '18h ago' },
+      { id: 'INST-1103', name: 'Apex – System 120 upgrade', counterparty: 'Apex Operations Ltd', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'completed', priority: 'medium', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'INST-1104', name: 'Centuria – System 98 maintenance', counterparty: 'Centuria Intelligence', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'completed', priority: 'low', date: 'May 25', lastUpdated: '2d ago' },
+      { id: 'INST-1105', name: 'Horizon – System 99 new site', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'INST-1106', name: 'Orion – System refresh (3 units)', counterparty: 'Orion Systems Group', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'medium', date: 'May 24', lastUpdated: '3d ago' },
+      { id: 'INST-1107', name: 'Zenith – Site C deployment', counterparty: 'Zenith Command', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 27', lastUpdated: '20h ago' },
+      { id: 'INST-1108', name: 'Vanguard – System 102 upgrade', counterparty: 'Vanguard Tech', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'completed', priority: 'medium', date: 'May 28', lastUpdated: '8h ago' },
+      { id: 'INST-1109', name: 'Stratos – new installation', counterparty: 'Stratos Security', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'INST-1110', name: 'Citadel – site expansion (2 units)', counterparty: 'Citadel Corp', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 25', lastUpdated: '2d ago' },
+      { id: 'INST-1111', name: 'Alpha Defense – Site II setup', counterparty: 'Alpha Defense Ltd', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'medium', date: 'May 26', lastUpdated: '30h ago' },
+    ],
+    monthly: [
+      { id: 'INST-1068', name: 'Beta Systems – Site A full deploy', counterparty: 'Beta Systems Inc', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 5', lastUpdated: '4w ago' },
+      { id: 'INST-1074', name: 'Frontier – Site Beta expansion', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 8', lastUpdated: '3w ago' },
+      { id: 'INST-1081', name: 'Sigma – preventive maintenance x3', counterparty: 'Sigma Defense', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'completed', priority: 'medium', date: 'May 12', lastUpdated: '2w ago' },
+      { id: 'INST-1086', name: 'Orion – System 97 replacement', counterparty: 'Orion Systems Group', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'completed', priority: 'high', date: 'May 15', lastUpdated: '2w ago' },
+      { id: 'INST-1092', name: 'Omega – 4-unit customer site', counterparty: 'Omega Systems', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'high', date: 'May 19', lastUpdated: '1w ago' },
+      { id: 'INST-1098', name: 'Citadel – Systems 100-101 install', counterparty: 'Citadel Corp', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 22', lastUpdated: '6d ago' },
+      { id: 'INST-1101', name: 'Frontier – Site Alpha, new install', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'INST-1107', name: 'Zenith – Site C deployment', counterparty: 'Zenith Command', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 27', lastUpdated: '20h ago' },
+    ],
+    quarterly: [
+      { id: 'INST-1012', name: 'Stratos – Q2 regional rollout (4 sites)', counterparty: 'Stratos Security', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'Apr 8', lastUpdated: '8w ago' },
+      { id: 'INST-1028', name: 'Citadel – enterprise batch deployment', counterparty: 'Citadel Corp', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'completed', priority: 'high', date: 'Apr 17', lastUpdated: '7w ago' },
+      { id: 'INST-1041', name: 'Sigma – 3 sites maintenance sweep', counterparty: 'Sigma Defense', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'completed', priority: 'medium', date: 'Apr 25', lastUpdated: '6w ago' },
+      { id: 'INST-1056', name: 'Orion – new customer site x2', counterparty: 'Orion Systems Group', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 5', lastUpdated: '4w ago' },
+      { id: 'INST-1068', name: 'Beta Systems – Site A full deploy', counterparty: 'Beta Systems Inc', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 5', lastUpdated: '4w ago' },
+      { id: 'INST-1086', name: 'Orion – System 97 replacement', counterparty: 'Orion Systems Group', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'completed', priority: 'high', date: 'May 15', lastUpdated: '2w ago' },
+      { id: 'INST-1092', name: 'Omega – 4-unit customer site', counterparty: 'Omega Systems', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'high', date: 'May 19', lastUpdated: '1w ago' },
+      { id: 'INST-1101', name: 'Frontier – Site Alpha, new install', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+    ],
+  },
+
+  'Cross-Team Support Hours': {
+    weekly: [
+      { id: 'SUP-801', name: 'R&D – emergency component sourcing', counterparty: 'R&D', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'critical', date: 'May 25–27', lastUpdated: '1d ago', notes: '16h — sourced 4 components under 24h' },
+      { id: 'SUP-802', name: 'R&D – prototype testing coordination', counterparty: 'R&D', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago', notes: '14h — test equipment procurement and setup' },
+      { id: 'SUP-803', name: 'R&D – lab supply run', counterparty: 'R&D', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'completed', priority: 'medium', date: 'May 24–25', lastUpdated: '3d ago', notes: '12h — 8 items sourced and delivered' },
+      { id: 'SUP-804', name: 'Defence – shipment coordination', counterparty: 'Defence', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'critical', date: 'May 25–27', lastUpdated: '18h ago', notes: '18h — end-to-end logistics for urgent Defence shipment' },
+      { id: 'SUP-805', name: 'Defence – procurement support', counterparty: 'Defence', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 26–27', lastUpdated: '1d ago', notes: '13h — 4 POs raised and approved same day' },
+      { id: 'SUP-806', name: 'Product – materials for roadmap demo', counterparty: 'Product', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'completed', priority: 'medium', date: 'May 24–28', lastUpdated: '8h ago', notes: '22h — 3 kits prepared for internal showcase' },
+      { id: 'SUP-807', name: 'Finance – supplier payment processing', counterparty: 'Finance', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 26–27', lastUpdated: '1d ago', notes: '18h — coordinated $284K payment batch with Finance' },
+      { id: 'SUP-808', name: 'CS – customer handover support', counterparty: 'Customer Success', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'medium', date: 'May 27–28', lastUpdated: '8h ago', notes: '13h — coordinated delivery docs for 3 customers' },
+    ],
+    monthly: [
+      { id: 'SUP-762', name: 'R&D – monthly component framework', counterparty: 'R&D', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 1–30', lastUpdated: '1d ago', notes: '168h total — ongoing sprint support' },
+      { id: 'SUP-770', name: 'Defence – Q2 logistics sprint', counterparty: 'Defence', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'completed', priority: 'critical', date: 'May 5–28', lastUpdated: '1d ago', notes: '124h — peak project delivery period' },
+      { id: 'SUP-778', name: 'Product – roadmap enablement', counterparty: 'Product', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'medium', date: 'May 8–28', lastUpdated: '1d ago', notes: '88h — spec reviews and prototype materials' },
+      { id: 'SUP-785', name: 'Finance – payment cycles x4', counterparty: 'Finance', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'high', date: 'May 1–30', lastUpdated: '1d ago', notes: '72h — 4 payment runs coordinated' },
+      { id: 'SUP-791', name: 'CS – customer delivery coordination', counterparty: 'Customer Success', counterpartyType: 'Department', owner: 'Eliav Mizrahi', status: 'completed', priority: 'medium', date: 'May 6–28', lastUpdated: '1d ago', notes: '46h — 8 customer handovers supported' },
+    ],
+    quarterly: [
+      { id: 'SUP-701', name: 'R&D – Q2 full engineering support', counterparty: 'R&D', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'Apr–Jun', lastUpdated: '1d ago', notes: '504h — highest quarterly support volume' },
+      { id: 'SUP-712', name: 'Defence – strategic project support', counterparty: 'Defence', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'completed', priority: 'critical', date: 'Apr–Jun', lastUpdated: '1d ago', notes: '372h — 3 major procurement programmes' },
+      { id: 'SUP-723', name: 'Product – Q2 roadmap enablement', counterparty: 'Product', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'medium', date: 'Apr–Jun', lastUpdated: '1d ago', notes: '264h — 2 product launches supported' },
+      { id: 'SUP-734', name: 'Finance – quarterly payment cycles', counterparty: 'Finance', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'high', date: 'Apr–Jun', lastUpdated: '1d ago', notes: '216h — $3.2M in payments coordinated' },
+      { id: 'SUP-745', name: 'CS – quarterly customer onboarding', counterparty: 'Customer Success', counterpartyType: 'Department', owner: 'Eliav Mizrahi', status: 'completed', priority: 'medium', date: 'Apr–Jun', lastUpdated: '1d ago', notes: '140h — 54 customer touchpoints' },
+    ],
+  },
+
+  'Procurement Activity': {
+    weekly: [
+      { id: 'PAY-701', name: 'Q2 framework settlement – Elektra', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'paid', priority: 'high', date: 'May 26', lastUpdated: '1d ago', notes: 'Amount: $84,000' },
+      { id: 'PAY-702', name: 'Emergency parts – Pacific Parts', counterparty: 'Pacific Parts Direct', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'paid', priority: 'critical', date: 'May 27', lastUpdated: '18h ago', notes: 'Amount: $12,400' },
+      { id: 'PAY-703', name: 'System 120 components – GlobalTech', counterparty: 'GlobalTech Supply', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'pending', priority: 'medium', date: 'Due May 30', lastUpdated: '8h ago', notes: 'Amount: $44,000' },
+      { id: 'PAY-704', name: 'Defence project invoice – Meridian', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'paid', priority: 'critical', date: 'May 25', lastUpdated: '2d ago', notes: 'Amount: $56,000' },
+      { id: 'PAY-705', name: 'BAZ restocking – Core Components', counterparty: 'Core Components Ltd', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'paid', priority: 'medium', date: 'May 24', lastUpdated: '3d ago', notes: 'Amount: $28,000' },
+      { id: 'PAY-706', name: 'Field service parts – FastTrack', counterparty: 'FastTrack Logistics', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'paid', priority: 'high', date: 'May 26', lastUpdated: '1d ago', notes: 'Amount: $18,000' },
+      { id: 'PAY-707', name: 'Customer kit materials – Precision', counterparty: 'Precision Parts Co', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'paid', priority: 'high', date: 'May 27', lastUpdated: '12h ago', notes: 'Amount: $22,000' },
+      { id: 'PAY-708', name: 'Routine supplies – Allied Materials', counterparty: 'Allied Materials', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'pending', priority: 'low', date: 'Due Jun 3', lastUpdated: '4h ago', notes: 'Amount: $20,000' },
+    ],
+    monthly: [
+      { id: 'PAY-660', name: 'Monthly framework – Elektra', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'paid', priority: 'high', date: 'May 2', lastUpdated: '4w ago', notes: 'Amount: $240,000' },
+      { id: 'PAY-668', name: 'BAZ Q2 restocking – Pacific Parts', counterparty: 'Pacific Parts Direct', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'paid', priority: 'high', date: 'May 7', lastUpdated: '3w ago', notes: 'Amount: $188,000' },
+      { id: 'PAY-676', name: 'Defence batch invoice – Meridian', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'paid', priority: 'critical', date: 'May 12', lastUpdated: '2w ago', notes: 'Amount: $312,000' },
+      { id: 'PAY-683', name: 'Systems 115–117 – GlobalTech', counterparty: 'GlobalTech Supply', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'paid', priority: 'high', date: 'May 17', lastUpdated: '2w ago', notes: 'Amount: $198,000' },
+      { id: 'PAY-690', name: 'Maintenance kits – Core Components', counterparty: 'Core Components Ltd', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'paid', priority: 'medium', date: 'May 22', lastUpdated: '6d ago', notes: 'Amount: $86,000' },
+      { id: 'PAY-701', name: 'Q2 settlement – Elektra', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'paid', priority: 'high', date: 'May 26', lastUpdated: '1d ago', notes: 'Amount: $84,000' },
+    ],
+    quarterly: [
+      { id: 'PAY-601', name: 'Q2 master agreement – Elektra', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'paid', priority: 'high', date: 'Apr 1', lastUpdated: '9w ago', notes: 'Amount: $720,000' },
+      { id: 'PAY-615', name: 'Enterprise batch – GlobalTech', counterparty: 'GlobalTech Supply', counterpartyType: 'Supplier', owner: 'Dan Cohen', status: 'paid', priority: 'high', date: 'Apr 10', lastUpdated: '8w ago', notes: 'Amount: $580,000' },
+      { id: 'PAY-629', name: 'Defence stockpile – Meridian', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'paid', priority: 'critical', date: 'Apr 22', lastUpdated: '7w ago', notes: 'Amount: $640,000' },
+      { id: 'PAY-643', name: 'BAZ full replenish – Pacific Parts', counterparty: 'Pacific Parts Direct', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'paid', priority: 'high', date: 'May 5', lastUpdated: '4w ago', notes: 'Amount: $420,000' },
+      { id: 'PAY-660', name: 'Monthly framework – Elektra', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'paid', priority: 'high', date: 'May 2', lastUpdated: '4w ago', notes: 'Amount: $240,000' },
+      { id: 'PAY-676', name: 'Defence batch invoice – Meridian', counterparty: 'Meridian Electronics', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'paid', priority: 'critical', date: 'May 12', lastUpdated: '2w ago', notes: 'Amount: $312,000' },
+      { id: 'PAY-701', name: 'Q2 settlement – Elektra', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Yotam Keret', status: 'paid', priority: 'high', date: 'May 26', lastUpdated: '1d ago', notes: 'Amount: $84,000' },
+      { id: 'PAY-708', name: 'Routine supplies – Allied Materials', counterparty: 'Allied Materials', counterpartyType: 'Supplier', owner: 'Noa Shaked', status: 'pending', priority: 'low', date: 'Due Jun 3', lastUpdated: '4h ago', notes: 'Amount: $20,000' },
+    ],
+  },
+
+  'Activities Completed': {
+    weekly: [
+      { id: 'ACT-1001', name: 'Systems 125–128 released from BAZ', counterparty: 'Zenith Command', counterpartyType: 'Customer', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'ACT-1002', name: 'Customs follow-up – System 124', counterparty: 'Horizon Defense Ltd', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'completed', priority: 'critical', date: 'May 27', lastUpdated: '18h ago' },
+      { id: 'ACT-1003', name: 'Emergency R&D procurement closed', counterparty: 'Elektra Components GmbH', counterpartyType: 'Supplier', owner: 'Amit Levy', status: 'completed', priority: 'critical', date: 'May 27', lastUpdated: '14h ago' },
+      { id: 'ACT-1004', name: 'BAZ inventory reconciliation', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'medium', date: 'May 25', lastUpdated: '2d ago' },
+      { id: 'ACT-1005', name: 'Supplier payment batch processed', counterparty: 'Finance', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'ACT-1006', name: 'Frontier Site Alpha installation confirmed', counterparty: 'Frontier Defense Systems', counterpartyType: 'Customer', owner: 'Eliav Mizrahi', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'ACT-1007', name: 'BAZ packing and labeling – 8 units', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'medium', date: 'May 24', lastUpdated: '3d ago' },
+      { id: 'ACT-1008', name: 'Oracle inventory update', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'completed', priority: 'low', date: 'May 25', lastUpdated: '2d ago' },
+      { id: 'ACT-1009', name: 'Defence shipment preparation – urgent', counterparty: 'Defence', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'critical', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'ACT-1010', name: 'Zenith deployment coordination', counterparty: 'Zenith Command', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'completed', priority: 'high', date: 'May 27', lastUpdated: '20h ago' },
+    ],
+    monthly: [
+      { id: 'ACT-0940', name: 'MSC full site deployment complete', counterparty: 'MSC Security', counterpartyType: 'Customer', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 14', lastUpdated: '2w ago' },
+      { id: 'ACT-0953', name: 'Customs backlog cleared – 8 cases', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'critical', date: 'May 19', lastUpdated: '1w ago' },
+      { id: 'ACT-0961', name: 'Oracle accuracy project completed', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'completed', priority: 'high', date: 'May 20', lastUpdated: '1w ago' },
+      { id: 'ACT-0971', name: 'Month-end supplier payment run', counterparty: 'Finance', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'May 26', lastUpdated: '1d ago' },
+      { id: 'ACT-0980', name: 'R&D sprint support – 4 sessions', counterparty: 'R&D', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'May 28', lastUpdated: '8h ago' },
+    ],
+    quarterly: [
+      { id: 'ACT-0801', name: 'Q2 BAZ capacity project delivered', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'high', date: 'Apr 30', lastUpdated: '5w ago' },
+      { id: 'ACT-0824', name: 'Enterprise batch deployment – 28 units', counterparty: 'Citadel Corp', counterpartyType: 'Customer', owner: 'Dan Cohen', status: 'completed', priority: 'high', date: 'Apr 18', lastUpdated: '7w ago' },
+      { id: 'ACT-0847', name: 'Procurement partner review – 8 suppliers', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'medium', date: 'May 5', lastUpdated: '4w ago' },
+      { id: 'ACT-0863', name: 'Regional deployment – 6 sites, 3 countries', counterparty: 'Stratos Security', counterpartyType: 'Customer', owner: 'Noa Shaked', status: 'completed', priority: 'high', date: 'May 21', lastUpdated: '1w ago' },
+      { id: 'ACT-0878', name: 'Q2 inventory close – 96% accuracy', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'completed', priority: 'medium', date: 'Jun 1', lastUpdated: '12h ago' },
+    ],
+  },
+
+  'Projects Advanced': {
+    weekly: [
+      { id: 'PROJ-601', name: 'Q2 BAZ capacity expansion', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'in-progress', priority: 'high', date: 'Due Jun 20', lastUpdated: '1d ago', notes: 'Phase 2 of 3 — racking installed, stock migration pending' },
+      { id: 'PROJ-602', name: 'Oracle–SAP integration pilot', counterparty: 'IT / Operations', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'in-progress', priority: 'high', date: 'Due Jun 30', lastUpdated: '2d ago', notes: '60% complete — data mapping signed off this week' },
+      { id: 'PROJ-603', name: 'New supplier onboarding – 4 vendors', counterparty: 'Procurement', counterpartyType: 'Department', owner: 'Amit Levy', status: 'in-progress', priority: 'medium', date: 'Due Jun 15', lastUpdated: '3d ago', notes: '2 vendors approved, 2 in legal review' },
+      { id: 'PROJ-604', name: 'Customer portal – ops module', counterparty: 'Product / Ops', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'in-progress', priority: 'high', date: 'Due Jun 30', lastUpdated: '1d ago', notes: 'Spec finalised — development started this week' },
+      { id: 'PROJ-605', name: 'Inventory system upgrade', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'in-progress', priority: 'critical', date: 'Due Jun 20', lastUpdated: '18h ago', notes: 'UAT in progress — 3 critical bugs resolved this week' },
+      { id: 'PROJ-606', name: 'Regional deployment plan – Q3', counterparty: 'Deployments', counterpartyType: 'Department', owner: 'Eliav Mizrahi', status: 'in-progress', priority: 'high', date: 'Due Jun 25', lastUpdated: '2d ago', notes: 'Site survey complete — logistics plan drafted' },
+    ],
+    monthly: [
+      { id: 'PROJ-601', name: 'Q2 BAZ capacity expansion', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'in-progress', priority: 'high', date: 'Due Jun 20', lastUpdated: '1d ago', notes: 'Phase 2 of 3 — 70% complete' },
+      { id: 'PROJ-602', name: 'Oracle–SAP integration pilot', counterparty: 'IT / Operations', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'in-progress', priority: 'high', date: 'Due Jun 30', lastUpdated: '2d ago', notes: '60% complete — data mapping signed off' },
+      { id: 'PROJ-603', name: 'New supplier onboarding – 4 vendors', counterparty: 'Procurement', counterpartyType: 'Department', owner: 'Amit Levy', status: 'in-progress', priority: 'medium', date: 'Due Jun 15', lastUpdated: '3d ago', notes: '2 vendors approved, 2 in legal review' },
+      { id: 'PROJ-604', name: 'Customer portal – ops module', counterparty: 'Product / Ops', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'in-progress', priority: 'high', date: 'Due Jun 30', lastUpdated: '1d ago', notes: 'Spec finalised — development started' },
+      { id: 'PROJ-605', name: 'Inventory system upgrade', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'in-progress', priority: 'critical', date: 'Due Jun 20', lastUpdated: '18h ago', notes: 'UAT in progress — 3 critical bugs resolved' },
+      { id: 'PROJ-606', name: 'Regional deployment plan – Q3', counterparty: 'Deployments', counterpartyType: 'Department', owner: 'Eliav Mizrahi', status: 'in-progress', priority: 'high', date: 'Due Jun 25', lastUpdated: '2d ago', notes: 'Site survey complete — logistics plan drafted' },
+      { id: 'PROJ-591', name: 'Q1 supplier renegotiation – closed', counterparty: 'Procurement', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'Closed Apr 15', lastUpdated: '6w ago', notes: 'Saved $76K annually across 3 contracts' },
+      { id: 'PROJ-594', name: 'BAZ safety audit – closed', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'completed', priority: 'medium', date: 'Closed Apr 22', lastUpdated: '5w ago', notes: 'Zero findings — certification renewed' },
+    ],
+    quarterly: [
+      { id: 'PROJ-601', name: 'Q2 BAZ capacity expansion', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'in-progress', priority: 'high', date: 'Due Jun 20', lastUpdated: '1d ago', notes: 'Phase 2 of 3 — 70% complete' },
+      { id: 'PROJ-602', name: 'Oracle–SAP integration pilot', counterparty: 'IT / Operations', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'in-progress', priority: 'high', date: 'Due Jun 30', lastUpdated: '2d ago', notes: '60% complete' },
+      { id: 'PROJ-603', name: 'New supplier onboarding – 4 vendors', counterparty: 'Procurement', counterpartyType: 'Department', owner: 'Amit Levy', status: 'in-progress', priority: 'medium', date: 'Due Jun 15', lastUpdated: '3d ago', notes: '2 of 4 vendors approved' },
+      { id: 'PROJ-604', name: 'Customer portal – ops module', counterparty: 'Product / Ops', counterpartyType: 'Department', owner: 'Noa Shaked', status: 'in-progress', priority: 'high', date: 'Due Jun 30', lastUpdated: '1d ago', notes: 'Development started this week' },
+      { id: 'PROJ-605', name: 'Inventory system upgrade', counterparty: 'Operations', counterpartyType: 'Department', owner: 'Yotam Keret', status: 'in-progress', priority: 'critical', date: 'Due Jun 20', lastUpdated: '18h ago', notes: 'UAT in progress' },
+      { id: 'PROJ-606', name: 'Regional deployment plan – Q3', counterparty: 'Deployments', counterpartyType: 'Department', owner: 'Eliav Mizrahi', status: 'in-progress', priority: 'high', date: 'Due Jun 25', lastUpdated: '2d ago', notes: 'Site survey complete' },
+      { id: 'PROJ-578', name: 'Q1 ERP data cleanup – closed', counterparty: 'IT / Operations', counterpartyType: 'Department', owner: 'Dan Cohen', status: 'completed', priority: 'medium', date: 'Closed Mar 31', lastUpdated: '9w ago', notes: '14,000 records cleaned and validated' },
+      { id: 'PROJ-582', name: 'Supplier diversity programme – closed', counterparty: 'Procurement', counterpartyType: 'Department', owner: 'Amit Levy', status: 'completed', priority: 'high', date: 'Closed Apr 8', lastUpdated: '8w ago', notes: '12 new approved suppliers added' },
+    ],
+  },
+
+};
