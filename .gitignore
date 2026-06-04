@@ -2,3 +2,5 @@ node_modules
 .next
 .DS_Store
 .env.local
+# One-time setup scripts contain temporary credentials — never commit
+scripts/
