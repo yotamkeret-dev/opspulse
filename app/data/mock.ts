@@ -230,16 +230,16 @@ export const timeRangeData = {
 };
 
 export const teamPulseStatus = [
-  { name: 'Yotam Keret', submitted: true, lastUpdated: null },
-  { name: 'Rami',        submitted: true, lastUpdated: null },
-  { name: 'Amir M.',     submitted: true, lastUpdated: null },
-  { name: 'Yaron Y.',    submitted: true, lastUpdated: null },
-  { name: 'Leon Gutnik', submitted: true, lastUpdated: null },
-  { name: 'Zohar B.',    submitted: true, lastUpdated: null },
-  { name: 'Israel',      submitted: true, lastUpdated: null },
-  { name: 'Jacob',       submitted: true, lastUpdated: null },
-  { name: 'Tal Matza',   submitted: true, lastUpdated: null },
-  { name: 'Guy Hadad',   submitted: true, lastUpdated: null },
+  { name: 'Rami Moskovich',  submitted: true, lastUpdated: null },
+  { name: 'Yotam Keret',     submitted: true, lastUpdated: null },
+  { name: 'Amir Meiri',      submitted: true, lastUpdated: null },
+  { name: 'Yaron Yahbes',    submitted: true, lastUpdated: null },
+  { name: 'Leon Gutnik',     submitted: true, lastUpdated: null },
+  { name: 'Zohar Bar',       submitted: true, lastUpdated: null },
+  { name: 'Israel Kalaora',  submitted: true, lastUpdated: null },
+  { name: 'Jacob Reingold',  submitted: true, lastUpdated: null },
+  { name: 'Tal Matza',       submitted: true, lastUpdated: null },
+  { name: 'Guy Hadad',       submitted: true, lastUpdated: null },
 ];
 
 export type KPIRecord = {
@@ -529,16 +529,16 @@ export type TeamMember = {
 };
 
 export const teamMembers: TeamMember[] = [
-  { id: 'yotam-keret',  name: 'Yotam Keret',  email: 'yotam.keret@orca-ai.io',  role: 'Operations Lead' },
-  { id: 'rami',         name: 'Rami',         email: 'rami@orca-ai.io',         role: 'Operations' },
-  { id: 'amir-m',       name: 'Amir M.',       email: 'amir.m@orca-ai.io',       role: 'Operations' },
-  { id: 'yaron-y',      name: 'Yaron Y.',      email: 'yaron.y@orca-ai.io',      role: 'Operations' },
-  { id: 'leon-gutnik',  name: 'Leon Gutnik',  email: 'leon.gutnik@orca-ai.io',  role: 'Operations' },
-  { id: 'zohar-b',      name: 'Zohar B.',      email: 'zohar.b@orca-ai.io',      role: 'Operations' },
-  { id: 'israel',       name: 'Israel',       email: 'israel@orca-ai.io',       role: 'Operations' },
-  { id: 'jacob',        name: 'Jacob',        email: 'jacob@orca-ai.io',        role: 'Operations' },
-  { id: 'tal-matza',    name: 'Tal Matza',    email: 'tal.matza@orca-ai.io',    role: 'Operations' },
-  { id: 'guy-hadad',    name: 'Guy Hadad',    email: 'guy.hadad@orca-ai.io',    role: 'Operations' },
+  { id: 'rami-moskovich',  name: 'Rami Moskovich',  email: 'rami@orca-ai.io',         role: 'Director of Operations' },
+  { id: 'yotam-keret',     name: 'Yotam Keret',     email: 'yotam.keret@orca-ai.io',  role: 'Operations Specialist' },
+  { id: 'amir-meiri',      name: 'Amir Meiri',      email: 'amir.m@orca-ai.io',       role: 'Operations Specialist' },
+  { id: 'yaron-yahbes',    name: 'Yaron Yahbes',    email: 'yaron.y@orca-ai.io',      role: 'Operations Specialist' },
+  { id: 'leon-gutnik',     name: 'Leon Gutnik',     email: 'leon.gutnik@orca-ai.io',  role: 'Operations Specialist' },
+  { id: 'zohar-bar',       name: 'Zohar Bar',       email: 'zohar.b@orca-ai.io',      role: 'Operations Specialist' },
+  { id: 'israel-kalaora',  name: 'Israel Kalaora',  email: 'israel@orca-ai.io',       role: 'Operations Specialist' },
+  { id: 'jacob-reingold',  name: 'Jacob Reingold',  email: 'jacob@orca-ai.io',        role: 'Operations Specialist' },
+  { id: 'tal-matza',       name: 'Tal Matza',       email: 'tal.matza@orca-ai.io',    role: 'Operations Specialist' },
+  { id: 'guy-hadad',       name: 'Guy Hadad',       email: 'guy.hadad@orca-ai.io',    role: 'Operations Specialist' },
 ];
 
 // ---------------------------------------------------------------------------
