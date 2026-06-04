@@ -2,7 +2,8 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isApproved } from '@/lib/approved-members';
 
-export async function middleware(request: NextRequest) {
+// Next.js 16 renamed "middleware" to "proxy" — same API, different export name.
+export async function proxy(request: NextRequest) {
   // In Demo Mode authentication is bypassed — the app works fully without Supabase.
   if (process.env.NEXT_PUBLIC_DEMO_MODE !== 'false') {
     return NextResponse.next();
@@ -34,7 +35,7 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // getUser() is always safe — never trusts a stale cookie.
+  // getUser() validates the token server-side — never trusts a stale cookie.
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
@@ -44,7 +45,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // User is authenticated but email is not on the approved list
+  // Authenticated but not on the approved Operations team list
   if (!isApproved(user.email)) {
     if (pathname === '/access-denied') return supabaseResponse;
     const url = request.nextUrl.clone();
@@ -56,6 +57,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Skip Next.js internals and static assets
   matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 };

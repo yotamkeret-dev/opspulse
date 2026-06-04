@@ -86,27 +86,16 @@ const pages = [
 
 type KPIItem = { label: string; value: string; note: string; priority: number };
 
-// Maps a YYYY-MM-DD date string to the nearest week tag used in PERIOD_WEEKS
+// Returns the ISO 8601 week tag for a YYYY-MM-DD date string, e.g. "W23".
+// Used as metadata on SupportLog entries (not used for filtering — see filterLogsByPeriod).
 function getWeekTag(dateStr: string): string {
-  if (!dateStr) return 'W22';
-  const d = new Date(dateStr);
-  const m = d.getMonth() + 1;
-  const day = d.getDate();
-  if (m >= 6) return 'W22';
-  if (m === 5) {
-    if (day >= 26) return 'W22';
-    if (day >= 19) return 'W21';
-    if (day >= 12) return 'W20';
-    if (day >= 5)  return 'W19';
-    return 'W18';
-  }
-  if (m === 4) {
-    if (day >= 21) return 'W17';
-    if (day >= 14) return 'W16';
-    if (day >= 7)  return 'W15';
-    return 'W14';
-  }
-  return 'W13';
+  const d = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+  // Find the Thursday of the ISO week (ISO weeks start on Monday; week 1 contains the first Thursday)
+  const thursday = new Date(d);
+  thursday.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(thursday.getFullYear(), 0, 1);
+  const weekNum   = Math.ceil(((thursday.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return `W${String(weekNum).padStart(2, '0')}`;
 }
 
 // Derive support chart data from logs
@@ -881,6 +870,25 @@ export default function App() {
       });
     }
   }, []);
+
+  // ── Real-time: push inserts from other users into local state ────────────
+  // Requires "Realtime" enabled on the support_logs table in Supabase dashboard.
+  useEffect(() => {
+    if (DEMO_MODE) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel('opspulse:logs')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'support_logs' },
+        (payload) => {
+          const newLog = rowToLog(payload.new as Record<string, unknown>);
+          setDbLogs(prev => (prev.some(l => l.id === newLog.id) ? prev : [newLog, ...prev]));
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived log array ─────────────────────────────────────────────────────
   // Demo  → localStorage submissions + seed data

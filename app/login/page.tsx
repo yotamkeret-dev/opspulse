@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
@@ -7,6 +7,14 @@ export default function LoginPage() {
   const [sent,    setSent]    = useState(false);
   const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Show error when redirected back from /auth/callback with ?error=auth_failed
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('error') === 'auth_failed') {
+      setError('The sign-in link was invalid or expired. Please request a new one.');
+    }
+  }, []);
 
   async function signIn(e: React.FormEvent) {
     e.preventDefault();
