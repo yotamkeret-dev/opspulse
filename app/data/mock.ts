@@ -122,20 +122,48 @@ export const dashboardSections: DashboardSection[] = [
   },
 ];
 
-// ─── Procurement Record (DB-migration ready) ───────────────────────────────
-// Future Supabase table: procurement_records
-// Columns: id (text), po_number (text), supplier (text), amount_usd (numeric),
-//          date (date), owner (text), status (text), category (text), employee_id (text)
+// ─── Procurement Record (Supabase table: procurement_records) ─────────────
+export const PROCUREMENT_CATEGORIES = [
+  'PO Created',
+  'Supplier Payment',
+  'Emergency Request',
+] as const;
+export type ProcurementCategory = typeof PROCUREMENT_CATEGORIES[number];
+
+export const PROCUREMENT_STATUSES = [
+  'Open',
+  'In Progress',
+  'Completed',
+] as const;
+export type ProcurementStatus = typeof PROCUREMENT_STATUSES[number];
+
 export type ProcurementRecord = {
-  id:         string;
-  poNumber:   string;   // → po_number
-  supplier:   string;
-  amountUsd:  number;   // → amount_usd (numeric)
-  date:       string;   // YYYY-MM-DD → date
-  owner:      string;
-  status:     'approved' | 'pending-approval' | 'cancelled';
-  category?:  string;   // 'Standard' | 'Emergency' | 'Framework'
+  id:           string;
+  employeeId:   string;           // → employee_id
+  employeeName: string;           // → employee_name
+  poNumber:     string;           // → po_number (required for 'PO Created')
+  supplier:     string;           // required
+  amountUsd:    number;           // → amount_usd (0 if not applicable)
+  category:     ProcurementCategory;
+  status:       ProcurementStatus;
+  notes:        string;
+  date:         string;           // YYYY-MM-DD → activity_date
 };
+
+// Demo-mode seed records (current week W23, Jun 1–4 2026)
+export const mockProcurementRecords: ProcurementRecord[] = [
+  { id:'PR-001', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4571', supplier:'Elektra Components GmbH', amountUsd:12400, category:'PO Created',       status:'Completed',   notes:'Emergency R&D components — sourced under 24h',      date:'2026-06-04' },
+  { id:'PR-002', employeeId:'dan-cohen',     employeeName:'Dan Cohen',     poNumber:'PO-4572', supplier:'Pacific Parts Direct',    amountUsd: 8200, category:'PO Created',       status:'Completed',   notes:'BAZ spare parts replenishment',                     date:'2026-06-03' },
+  { id:'PR-003', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'PO-4573', supplier:'GlobalTech Supply',       amountUsd:34000, category:'PO Created',       status:'In Progress', notes:'System 120 assembly components — awaiting sign-off', date:'2026-06-03' },
+  { id:'PR-004', employeeId:'noa-shaked',    employeeName:'Noa Shaked',    poNumber:'PO-4574', supplier:'Meridian Electronics',    amountUsd:56000, category:'PO Created',       status:'Completed',   notes:'Defence project materials Q2',                      date:'2026-06-02' },
+  { id:'PR-005', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4575', supplier:'Core Components Ltd',     amountUsd: 9600, category:'PO Created',       status:'Completed',   notes:'Inventory replenishment — screens batch',            date:'2026-06-01' },
+  { id:'PR-006', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'',        supplier:'Elektra Components GmbH', amountUsd:84000, category:'Supplier Payment', status:'Completed',   notes:'Q2 framework settlement',                           date:'2026-06-04' },
+  { id:'PR-007', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'',        supplier:'Meridian Electronics',    amountUsd:56000, category:'Supplier Payment', status:'Completed',   notes:'Defence project invoice cleared',                   date:'2026-06-02' },
+  { id:'PR-008', employeeId:'dan-cohen',     employeeName:'Dan Cohen',     poNumber:'',        supplier:'Pacific Parts Direct',    amountUsd:12400, category:'Supplier Payment', status:'Completed',   notes:'Emergency parts — same-day payment released',       date:'2026-06-03' },
+  { id:'PR-009', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'PO-4571', supplier:'Elektra Components GmbH', amountUsd:12400, category:'Emergency Request',status:'Completed',   notes:'R&D sprint blocker — component sourced in 4h',     date:'2026-06-04' },
+  { id:'PR-010', employeeId:'noa-shaked',    employeeName:'Noa Shaked',    poNumber:'PO-4574', supplier:'Meridian Electronics',    amountUsd:56000, category:'Emergency Request',status:'Completed',   notes:'Defence shipment — last-minute approval obtained',  date:'2026-06-02' },
+  { id:'PR-011', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4577', supplier:'Precision Parts Co',     amountUsd: 7100, category:'Emergency Request',status:'In Progress', notes:'Product support materials — awaiting delivery',     date:'2026-06-01' },
+];
 
 export const timeRangeData = {
   weekly: {

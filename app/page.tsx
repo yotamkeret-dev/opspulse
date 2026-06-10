@@ -1,11 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { createClient } from '@/lib/supabase/client';
 import {
   ACTIVITY_CATEGORIES, DashboardKpi, KPIRecord, MONTH_NAMES, Period, PeriodType,
+  ProcurementCategory, ProcurementRecord, PROCUREMENT_CATEGORIES, PROCUREMENT_STATUSES,
   SupportLog, TeamMember, TimeFilter,
   currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod,
-  getTimeFilterLabel, kpiRecords, seedSupportLogs,
+  getDateRangeForFilter, getTimeFilterLabel, kpiRecords, mockProcurementRecords, seedSupportLogs,
   teamMembers, timeRangeData,
 } from './data/mock';
 
@@ -13,7 +15,6 @@ import {
 function timeFilterToPeriod(tf: TimeFilter): Period {
   return tf.periodType === 'week' ? 'weekly' : tf.periodType === 'month' ? 'monthly' : 'quarterly';
 }
-import { createClient } from '@/lib/supabase/client';
 
 // ─── Mode flag ─────────────────────────────────────────────────────────────
 // DEMO_MODE=true  → seed data + localStorage, no auth required (default when env var absent)
@@ -102,6 +103,54 @@ async function insertLogToDB(
   });
   if (error) throw new Error(error.message);
 }
+
+// ─── Procurement DB helpers ────────────────────────────────────────────────
+
+function rowToProcurementRecord(row: Record<string, unknown>): ProcurementRecord {
+  return {
+    id:           String(row.id),
+    employeeId:   String(row.employee_id),
+    employeeName: String(row.employee_name),
+    poNumber:     String(row.po_number ?? ''),
+    supplier:     String(row.supplier),
+    amountUsd:    Number(row.amount_usd ?? 0),
+    category:     String(row.category) as ProcurementRecord['category'],
+    status:       String(row.status)   as ProcurementRecord['status'],
+    notes:        String(row.notes ?? ''),
+    date:         String(row.activity_date),
+  };
+}
+
+async function fetchProcurementFromDB(tf: TimeFilter): Promise<ProcurementRecord[]> {
+  const supabase = createClient();
+  const { start, end } = getDateRangeForFilter(tf);
+  const { data, error } = await supabase
+    .from('procurement_records')
+    .select('*')
+    .gte('activity_date', start.toISOString().slice(0, 10))
+    .lte('activity_date', end.toISOString().slice(0, 10))
+    .order('activity_date', { ascending: false });
+  if (error) { console.error('fetchProcurement:', error.message); return []; }
+  return (data ?? []).map(rowToProcurementRecord);
+}
+
+async function insertProcurementToDB(record: ProcurementRecord): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('procurement_records').insert({
+    id:            record.id,
+    employee_id:   record.employeeId,
+    employee_name: record.employeeName,
+    po_number:     record.poNumber || null,
+    supplier:      record.supplier,
+    amount_usd:    record.amountUsd || null,
+    category:      record.category,
+    status:        record.status,
+    notes:         record.notes,
+    activity_date: record.date,
+  });
+  if (error) throw new Error(error.message);
+}
+
 
 const pages = [
   'Executive Dashboard', 'Team Contributions', 'Logistics', 'Procurement',
@@ -667,7 +716,300 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
   );
 }
 
-// ─── Metric pages (Logistics / Procurement / Deployments) ─────────────────
+// ─── Procurement Drill-Down Panel ─────────────────────────────────────────
+
+function ProcurementDrillDown({ category, records, onClose }: {
+  category: ProcurementCategory;
+  records: ProcurementRecord[];
+  onClose: () => void;
+}) {
+  const filtered  = records.filter(r => r.category === category);
+  const totalUsd  = filtered.reduce((s, r) => s + r.amountUsd, 0);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{category}</h3>
+            <div className="small" style={{ marginTop: 4 }}>
+              {filtered.length} record{filtered.length !== 1 ? 's' : ''}
+              {totalUsd > 0 && ` · $${totalUsd.toLocaleString()}`}
+            </div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="panel-body">
+          {filtered.length === 0 ? (
+            <div className="panel-empty"><div className="panel-empty-icon">📋</div><div>No records for this period</div></div>
+          ) : (
+            <table className="record-table">
+              <thead>
+                <tr><th>PO Number</th><th>Supplier</th><th>Amount</th><th>Owner</th><th>Date</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.id}>
+                    <td><span className="rec-id">{r.poNumber || '—'}</span></td>
+                    <td>
+                      <div className="rec-name">{r.supplier}</div>
+                      {r.notes && <div className="rec-notes">{r.notes}</div>}
+                    </td>
+                    <td style={{ fontWeight: 700, color: r.amountUsd > 0 ? 'var(--color-completed)' : 'var(--color-muted)', whiteSpace: 'nowrap' }}>
+                      {r.amountUsd > 0 ? `$${r.amountUsd.toLocaleString()}` : '—'}
+                    </td>
+                    <td>{r.employeeName}</td>
+                    <td><span className="small">{r.date}</span></td>
+                    <td>
+                      <span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : r.status === 'In Progress' ? 'status-in-progress' : 'status-blocked'}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Procurement Entry Form ────────────────────────────────────────────────
+
+function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
+  onSave: (r: ProcurementRecord) => void;
+  onCancel: () => void;
+  activeTeamMembers: TeamMember[];
+}) {
+  const [employeeId, setEmployeeId] = useState('');
+  const [category,   setCategory]   = useState<ProcurementCategory>(PROCUREMENT_CATEGORIES[0]);
+  const [poNumber,   setPoNumber]   = useState('');
+  const [supplier,   setSupplier]   = useState('');
+  const [amountUsd,  setAmountUsd]  = useState('');
+  const [status,     setStatus]     = useState<ProcurementRecord['status']>(PROCUREMENT_STATUSES[0]);
+  const [notes,      setNotes]      = useState('');
+  const [date,       setDate]       = useState(new Date().toISOString().slice(0, 10));
+
+  const save = () => {
+    if (!employeeId)              { alert('Please select an employee.'); return; }
+    if (!supplier.trim())         { alert('Supplier is required.'); return; }
+    if (category === 'PO Created' && !poNumber.trim()) { alert('PO Number is required for PO Created.'); return; }
+    if (amountUsd && isNaN(parseFloat(amountUsd)))     { alert('Amount USD must be a valid number.'); return; }
+    const member = activeTeamMembers.find(m => m.id === employeeId);
+    if (!member) return;
+    onSave({
+      id:           `PR-${Date.now()}`,
+      employeeId,
+      employeeName: member.name,
+      poNumber:     poNumber.trim(),
+      supplier:     supplier.trim(),
+      amountUsd:    amountUsd ? parseFloat(amountUsd) : 0,
+      category,
+      status,
+      notes:        notes.trim(),
+      date,
+    });
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 18 }}>
+      <h2 className="section-title">Log Procurement Activity</h2>
+      <div className="grid two">
+        <div>
+          <div className="kpi-label">Employee *</div>
+          <select className="input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+            <option value="">— Select employee —</option>
+            {activeTeamMembers.map(m => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="kpi-label">Category *</div>
+          <select className="input" value={category} onChange={e => setCategory(e.target.value as ProcurementCategory)}>
+            {PROCUREMENT_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        {category === 'PO Created' && (
+          <div>
+            <div className="kpi-label">PO Number *</div>
+            <input className="input" value={poNumber} onChange={e => setPoNumber(e.target.value)} placeholder="e.g. PO-4571" />
+          </div>
+        )}
+        <div>
+          <div className="kpi-label">Supplier *</div>
+          <input className="input" value={supplier} onChange={e => setSupplier(e.target.value)} placeholder="e.g. Elektra Components GmbH" />
+        </div>
+        <div>
+          <div className="kpi-label">Amount USD</div>
+          <input className="input" type="number" min="0" step="0.01" value={amountUsd} onChange={e => setAmountUsd(e.target.value)} placeholder="e.g. 12400" />
+        </div>
+        <div>
+          <div className="kpi-label">Status</div>
+          <select className="input" value={status} onChange={e => setStatus(e.target.value as ProcurementRecord['status'])}>
+            {PROCUREMENT_STATUSES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="kpi-label">Activity Date</div>
+          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div>
+          <div className="kpi-label">Notes</div>
+          <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional context or outcome" />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+        <button className="save-button" style={{ marginTop: 0 }} onClick={save}>Save</button>
+        <button onClick={onCancel} style={{ background: 'rgba(255,255,255,.07)', border: '1px solid var(--color-border)', color: '#e8eef7', borderRadius: 12, padding: '11px 20px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Procurement Page (live data) ──────────────────────────────────────────
+
+function ProcurementPage({ timeFilter, activeTeamMembers }: {
+  timeFilter: TimeFilter;
+  activeTeamMembers: TeamMember[];
+}) {
+  const [records,  setRecords]  = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
+  const [loading,  setLoading]  = useState(!DEMO_MODE);
+  const [selected, setSelected] = useState<ProcurementCategory | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saveErr,  setSaveErr]  = useState('');
+
+  useEffect(() => {
+    if (DEMO_MODE) return;
+    setLoading(true);
+    fetchProcurementFromDB(timeFilter).then(data => { setRecords(data); setLoading(false); });
+  }, [timeFilter]);
+
+  // Derived KPIs
+  const poCat   = records.filter(r => r.category === 'PO Created');
+  const payCat  = records.filter(r => r.category === 'Supplier Payment');
+  const emergCat = records.filter(r => r.category === 'Emergency Request');
+  const poTotal  = poCat.reduce((s, r)  => s + r.amountUsd, 0);
+  const payTotal = payCat.reduce((s, r) => s + r.amountUsd, 0);
+
+  const handleSave = async (record: ProcurementRecord) => {
+    setSaveErr('');
+    try {
+      if (!DEMO_MODE) await insertProcurementToDB(record);
+      setRecords(prev => [record, ...prev]);
+      setShowForm(false);
+    } catch (err) {
+      setSaveErr(err instanceof Error ? err.message : 'Failed to save record.');
+    }
+  };
+
+  return (
+    <>
+      {selected && <ProcurementDrillDown category={selected} records={records} onClose={() => setSelected(null)} />}
+
+      <div className="page-header">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <h2>Procurement Activity</h2>
+            <div className="small">Purchase orders, payments and emergency requests · {getTimeFilterLabel(timeFilter)}</div>
+          </div>
+          {!showForm && (
+            <button className="save-button" style={{ marginTop: 0, flexShrink: 0 }} onClick={() => setShowForm(true)}>
+              + Log Procurement
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showForm && (
+        <ProcurementEntryForm
+          onSave={handleSave}
+          onCancel={() => { setShowForm(false); setSaveErr(''); }}
+          activeTeamMembers={activeTeamMembers}
+        />
+      )}
+
+      {saveErr && (
+        <div style={{ fontSize: 13, color: 'var(--color-critical)', padding: '10px 14px', background: 'rgba(239,68,68,.08)', borderRadius: 10, marginBottom: 14 }}>
+          {saveErr}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="card"><div className="panel-empty"><div className="panel-empty-icon">⏳</div><div>Loading procurement records…</div></div></div>
+      ) : (
+        <div className="grid three">
+          <div className="card kpi-clickable" role="button" tabIndex={0}
+            onClick={() => setSelected('PO Created')} onKeyDown={e => e.key === 'Enter' && setSelected('PO Created')}>
+            <div className="kpi-label">PO Created</div>
+            <div className="kpi-value">{poCat.length}</div>
+            <div className="small">{poTotal > 0 ? `Total $${poTotal.toLocaleString()}` : 'No payments this period'}</div>
+          </div>
+          <div className="card kpi-clickable" role="button" tabIndex={0}
+            onClick={() => setSelected('Emergency Request')} onKeyDown={e => e.key === 'Enter' && setSelected('Emergency Request')}>
+            <div className="kpi-label">Emergency Requests</div>
+            <div className="kpi-value">{emergCat.length}</div>
+            <div className="small">Short-notice requests</div>
+          </div>
+          <div className="card kpi-clickable" role="button" tabIndex={0}
+            onClick={() => setSelected('Supplier Payment')} onKeyDown={e => e.key === 'Enter' && setSelected('Supplier Payment')}>
+            <div className="kpi-label">Supplier Payments</div>
+            <div className="kpi-value">{payCat.length}</div>
+            <div className="small">{payTotal > 0 ? `Total $${payTotal.toLocaleString()}` : 'No payments this period'}</div>
+          </div>
+        </div>
+      )}
+
+      {!loading && records.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2 className="section-title">All Records</h2>
+          <table className="table">
+            <thead>
+              <tr><th>Category</th><th>PO Number</th><th>Supplier</th><th>Amount</th><th>Owner</th><th>Date</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {records.map(r => (
+                <tr key={r.id}>
+                  <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
+                  <td><span className="rec-id">{r.poNumber || '—'}</span></td>
+                  <td><b>{r.supplier}</b>{r.notes && <div className="small">{r.notes}</div>}</td>
+                  <td style={{ fontWeight: 700, color: r.amountUsd > 0 ? 'var(--color-completed)' : 'var(--color-muted)', whiteSpace: 'nowrap' }}>
+                    {r.amountUsd > 0 ? `$${r.amountUsd.toLocaleString()}` : '—'}
+                  </td>
+                  <td>{r.employeeName}</td>
+                  <td>{r.date}</td>
+                  <td>
+                    <span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : r.status === 'In Progress' ? 'status-in-progress' : 'status-blocked'}`}>
+                      {r.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && records.length === 0 && (
+        <div className="card" style={{ marginTop: 8 }}>
+          <div className="panel-empty">
+            <div className="panel-empty-icon">📋</div>
+            <div>No procurement records for this period. Use <b>+ Log Procurement</b> to add one.</div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Metric pages (Logistics / Deployments) ────────────────────────────────
 
 function MetricPage({ title, intro, rows }: { title: string; intro: string; rows: { metric: string; value: string; detail: string; alert?: boolean }[] }) {
   return (
@@ -1025,7 +1367,7 @@ export default function App() {
   let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
-  if (page === 'Procurement')                  content = <MetricPage title="Procurement" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={data.procurement} />;
+  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Deployments & Installations')  content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity." rows={data.deployments} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} />;
