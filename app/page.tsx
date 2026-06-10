@@ -622,13 +622,44 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
 function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
   const [selectedKpi,    setSelectedKpi]    = useState<DashboardKpi | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
+  const [procRecords,    setProcRecords]    = useState<ProcurementRecord[]>([]);
 
   const openKpi    = (kpi: DashboardKpi) => { setSelectedMember(null); setSelectedKpi(kpi); };
   const openMember = (name: string)      => { setSelectedKpi(null); setSelectedMember(name); };
 
+  // Fetch procurement records for the selected period — drives the Procurement Activity section
+  useEffect(() => {
+    const { start, end } = getDateRangeForFilter(timeFilter);
+    end.setHours(23, 59, 59, 999);
+    if (DEMO_MODE) {
+      // Filter mock records client-side so demo mode respects the time filter too
+      setProcRecords(
+        mockProcurementRecords.filter(r => {
+          if (!r.date) return false;
+          const d = new Date(r.date + 'T00:00:00');
+          return d >= start && d <= end;
+        })
+      );
+    } else {
+      fetchProcurementFromDB(timeFilter).then(setProcRecords);
+    }
+  }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Derive live Procurement Activity KPI values from procurement_records
+  const procPO    = procRecords.filter(r => r.category === 'PO Created');
+  const procPay   = procRecords.filter(r => r.category === 'Supplier Payment');
+  const procEmerg = procRecords.filter(r => r.category === 'Emergency Request');
+  const procPoTotal  = procPO.reduce((s, r)  => s + r.amountUsd, 0);
+  const procPayTotal = procPay.reduce((s, r) => s + r.amountUsd, 0);
+  const procKpiOverrides: Record<string, { value: string; note: string }> = {
+    'PO Created':         { value: String(procPO.length),    note: procPoTotal  > 0 ? `Total $${procPoTotal.toLocaleString()}`  : 'No POs this period'      },
+    'Emergency Requests': { value: String(procEmerg.length), note: 'Short-notice requests across departments'                                               },
+    'Supplier Payments':  { value: String(procPay.length),   note: procPayTotal > 0 ? `Total $${procPayTotal.toLocaleString()}` : 'No payments this period' },
+  };
+
   // Derive live support metrics from SupportLog
-  const filtered     = filterLogsByTimeFilter(supportLogs, timeFilter);
-  const derivedHours = filtered.reduce((s, l) => s + l.hours, 0);
+  const filtered       = filterLogsByTimeFilter(supportLogs, timeFilter);
+  const derivedHours   = filtered.reduce((s, l) => s + l.hours, 0);
   const derivedSupport = buildSupportByDept(filtered);
 
   return (
@@ -643,6 +674,10 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
           <div className="grid three">
             {section.kpis.map(kpi => {
               const clickable = Boolean(kpi.kpiRecordKey);
+              // Apply live procurement data override for Procurement Activity section
+              const override     = procKpiOverrides[kpi.label];
+              const displayValue = override ? override.value : kpi.value;
+              const displayNote  = override ? override.note  : kpi.note;
               return (
                 <div
                   key={kpi.label}
@@ -653,8 +688,8 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
                   onKeyDown={clickable ? e => e.key === 'Enter' && openKpi(kpi) : undefined}
                 >
                   <div className="kpi-label">{kpi.label}</div>
-                  <div className="kpi-value">{kpi.value}</div>
-                  <div className="small">{kpi.note}</div>
+                  <div className="kpi-value">{displayValue}</div>
+                  <div className="small">{displayNote}</div>
                 </div>
               );
             })}

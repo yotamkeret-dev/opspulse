@@ -202,8 +202,6 @@ export const timeRangeData = {
     deployments: [
       { metric: 'Installations Completed', value: '11', detail: 'Completed end-to-end' },
       { metric: 'Maintenance Activities', value: '16', detail: 'Ad-hoc and planned customer work' },
-      { metric: 'Customer Kickoffs', value: '5', detail: 'New customers and expansion activity' },
-      { metric: 'Trainings Delivered', value: '8', detail: 'Internal and external onboarding' },
     ],
     activityByCategory: [
       { name: 'Logistics', value: 32 },
@@ -278,8 +276,6 @@ export const timeRangeData = {
     deployments: [
       { metric: 'Installations Completed', value: '43', detail: 'Completed end-to-end' },
       { metric: 'Maintenance Activities', value: '62', detail: 'Ad-hoc and planned customer work' },
-      { metric: 'Customer Kickoffs', value: '18', detail: 'New customers and expansion activity' },
-      { metric: 'Trainings Delivered', value: '31', detail: 'Internal and external onboarding' },
     ],
     activityByCategory: [
       { name: 'Logistics', value: 128 },
@@ -354,8 +350,6 @@ export const timeRangeData = {
     deployments: [
       { metric: 'Installations Completed', value: '127', detail: 'Completed end-to-end' },
       { metric: 'Maintenance Activities', value: '187', detail: 'Ad-hoc and planned customer work' },
-      { metric: 'Customer Kickoffs', value: '54', detail: 'New customers and expansion activity' },
-      { metric: 'Trainings Delivered', value: '94', detail: 'Internal and external onboarding' },
     ],
     activityByCategory: [
       { name: 'Logistics', value: 384 },
