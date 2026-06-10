@@ -620,12 +620,32 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
 // ─── Executive Dashboard ───────────────────────────────────────────────────
 
 function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
-  const [selectedKpi,    setSelectedKpi]    = useState<DashboardKpi | null>(null);
-  const [selectedMember, setSelectedMember] = useState<string | null>(null);
-  const [procRecords,    setProcRecords]    = useState<ProcurementRecord[]>([]);
+  const [selectedKpi,          setSelectedKpi]          = useState<DashboardKpi | null>(null);
+  const [selectedMember,       setSelectedMember]       = useState<string | null>(null);
+  const [selectedProcCategory, setSelectedProcCategory] = useState<ProcurementCategory | null>(null);
+  const [procRecords,          setProcRecords]          = useState<ProcurementRecord[]>([]);
 
-  const openKpi    = (kpi: DashboardKpi) => { setSelectedMember(null); setSelectedKpi(kpi); };
-  const openMember = (name: string)      => { setSelectedKpi(null); setSelectedMember(name); };
+  // Maps the three Procurement Activity KPI labels to ProcurementCategory values.
+  // Any label in this map routes to ProcurementDrillDown (live data) instead of KPIDetailPanel (mock).
+  const PROC_DRILL_MAP: Partial<Record<string, ProcurementCategory>> = {
+    'PO Created':         'PO Created',
+    'Emergency Requests': 'Emergency Request',
+    'Supplier Payments':  'Supplier Payment',
+  };
+
+  const openKpi = (kpi: DashboardKpi) => {
+    setSelectedMember(null);
+    const procCat = PROC_DRILL_MAP[kpi.label];
+    if (procCat) {
+      // Procurement card → live ProcurementDrillDown, not mock KPIDetailPanel
+      setSelectedKpi(null);
+      setSelectedProcCategory(procCat);
+    } else {
+      setSelectedProcCategory(null);
+      setSelectedKpi(kpi);
+    }
+  };
+  const openMember = (name: string) => { setSelectedKpi(null); setSelectedProcCategory(null); setSelectedMember(name); };
 
   // Fetch procurement records for the selected period — drives the Procurement Activity section
   useEffect(() => {
@@ -664,8 +684,9 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
 
   return (
     <>
-      {selectedKpi    && <KPIDetailPanel kpi={selectedKpi} timeFilter={timeFilter} onClose={() => setSelectedKpi(null)} />}
-      {selectedMember && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
+      {selectedKpi          && <KPIDetailPanel kpi={selectedKpi} timeFilter={timeFilter} onClose={() => setSelectedKpi(null)} />}
+      {selectedProcCategory && <ProcurementDrillDown category={selectedProcCategory} records={procRecords} onClose={() => setSelectedProcCategory(null)} />}
+      {selectedMember       && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
 
       {/* ── Three operational sections ───────────────────────────────── */}
       {dashboardSections.map(section => (
