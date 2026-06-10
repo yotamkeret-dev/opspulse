@@ -4,7 +4,7 @@ import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, 
 import {
   ACTIVITY_CATEGORIES, KPIRecord, Period, SupportLog, TeamMember,
   filterLogsByPeriod, kpiRecords, seedSupportLogs,
-  teamMembers, teamPulseStatus, timeRangeData,
+  teamMembers, timeRangeData,
 } from './data/mock';
 import { createClient } from '@/lib/supabase/client';
 
@@ -43,6 +43,24 @@ function rowToLog(row: Record<string, unknown>): SupportLog {
     week:         String(row.week),
     notes:        String(row.notes ?? ''),
   };
+}
+
+// Fetches active team members from Supabase team_members table.
+// Uses email as the stable TeamMember.id so the dropdown value is always email-based.
+async function fetchTeamMembersFromDB(): Promise<TeamMember[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('team_members')
+    .select('name, email, role')
+    .eq('active', true)
+    .order('name');
+  if (error) { console.error('fetchTeamMembers:', error.message); return []; }
+  return (data ?? []).map((row: Record<string, unknown>) => ({
+    id:    String(row.email),           // email as stable unique id
+    name:  String(row.name),
+    email: String(row.email),
+    role:  String(row.role ?? 'Operations Specialist'),
+  }));
 }
 
 async function fetchLogsFromDB(): Promise<SupportLog[]> {
@@ -418,12 +436,13 @@ function EmployeePanel({ member, period, supportLogs, onClose }: {
 
 // ─── Team Contributions page ───────────────────────────────────────────────
 
-function TeamContributions({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
+function TeamContributions({ period, supportLogs, activeTeamMembers }: { period: Period; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const filtered = filterLogsByPeriod(supportLogs, period);
 
-  const memberStats = teamMembers.map(m => {
-    const logs = filtered.filter(l => l.employeeId === m.id);
+  const memberStats = activeTeamMembers.map(m => {
+    // Match by name — works for both slug-id (legacy) and email-id (Supabase) records
+    const logs = filtered.filter(l => l.employeeName === m.name);
     const hours = logs.reduce((s, l) => s + l.hours, 0);
     const depts = [...new Set(logs.map(l => l.department))];
     const lastLog = logs[0];
@@ -510,7 +529,7 @@ function TeamContributions({ period, supportLogs }: { period: Period; supportLog
 
 // ─── Executive Dashboard ───────────────────────────────────────────────────
 
-function Executive({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
+function Executive({ period, supportLogs, activeTeamMembers }: { period: Period; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
   const data = timeRangeData[period];
   const [selectedKpi, setSelectedKpi]       = useState<KPIItem | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
@@ -542,7 +561,7 @@ function Executive({ period, supportLogs }: { period: Period; supportLogs: Suppo
         <div className="card">
           <h2 className="section-title">Team Last Updates</h2>
           <div className="team-pulse-list">
-            {teamPulseStatus.filter(m => m.submitted).map(m => {
+            {activeTeamMembers.map(m => {
               const memberLogs = filtered.filter(l => l.employeeName === m.name);
               const hours = memberLogs.reduce((s, l) => s + l.hours, 0);
               const depts = [...new Set(memberLogs.map(l => l.department))];
@@ -727,7 +746,7 @@ function ActivityFeed({ period, supportLogs }: { period: Period; supportLogs: Su
 
 // ─── Add Weekly Activity (primary contribution logging engine) ─────────────
 
-function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
+function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: SupportLog) => void; activeTeamMembers: TeamMember[] }) {
   const [employeeId,  setEmployeeId]  = useState('');
   const [department,  setDepartment]  = useState('R&D');
   const [category,    setCategory]    = useState<string>(ACTIVITY_CATEGORIES[0]);
@@ -738,7 +757,7 @@ function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
   const [recent,      setRecent]      = useState<SupportLog[]>([]);
 
   const save = () => {
-    const member = teamMembers.find(m => m.id === employeeId);
+    const member = activeTeamMembers.find(m => m.id === employeeId);
     if (!member || !title.trim() || !hours || parseFloat(hours) <= 0) {
       alert('Please fill in all required fields (Employee, Title, Hours).');
       return;
@@ -779,7 +798,10 @@ function AddWeeklyActivity({ addLog }: { addLog: (log: SupportLog) => void }) {
             <div className="kpi-label">Employee *</div>
             <select className="input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
               <option value="">— Select employee —</option>
-              {teamMembers.map(m => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
+              {activeTeamMembers.length === 0
+                ? <option disabled>Loading team…</option>
+                : activeTeamMembers.map(m => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)
+              }
             </select>
             <div className="form-note">For now, select the employee manually. This will be auto-filled after login is added.</div>
           </div>
@@ -848,9 +870,10 @@ export default function App() {
   const [userLogs, setUserLogs] = useState<SupportLog[]>([]);
 
   // ── Production Mode state ────────────────────────────────────────────────
-  const [dbLogs,    setDbLogs]    = useState<SupportLog[]>([]);
-  const [authUser,  setAuthUser]  = useState<{ id: string; email: string } | null>(null);
-  const [dbLoading, setDbLoading] = useState(!DEMO_MODE);
+  const [dbLogs,         setDbLogs]         = useState<SupportLog[]>([]);
+  const [dbTeamMembers,  setDbTeamMembers]   = useState<TeamMember[]>([]);
+  const [authUser,       setAuthUser]        = useState<{ id: string; email: string } | null>(null);
+  const [dbLoading,      setDbLoading]       = useState(!DEMO_MODE);
 
   // ── Bootstrap ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -863,8 +886,13 @@ export default function App() {
       supabase.auth.getUser().then(async ({ data: { user } }) => {
         if (user) {
           setAuthUser({ id: user.id, email: user.email ?? '' });
-          const logs = await fetchLogsFromDB();
+          // Fetch logs and team members in parallel
+          const [logs, members] = await Promise.all([
+            fetchLogsFromDB(),
+            fetchTeamMembersFromDB(),
+          ]);
           setDbLogs(logs);
+          if (members.length > 0) setDbTeamMembers(members);
         }
         setDbLoading(false);
       });
@@ -896,6 +924,13 @@ export default function App() {
   const supportLogs: SupportLog[] = DEMO_MODE
     ? [...userLogs, ...seedSupportLogs]
     : dbLogs;
+
+  // ── Active team members ───────────────────────────────────────────────────
+  // Demo  → hardcoded mock roster
+  // Prod  → live Supabase team_members, with mock as fallback if fetch failed
+  const activeTeamMembers: TeamMember[] = DEMO_MODE
+    ? teamMembers
+    : (dbTeamMembers.length > 0 ? dbTeamMembers : teamMembers);
 
   // ── Add log ───────────────────────────────────────────────────────────────
   const addLog = async (log: SupportLog) => {
@@ -934,15 +969,15 @@ export default function App() {
 
   const data = timeRangeData[period];
 
-  let content = <Executive period={period} supportLogs={supportLogs} />;
-  if (page === 'Team Contributions')           content = <TeamContributions period={period} supportLogs={supportLogs} />;
+  let content = <Executive period={period} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
+  if (page === 'Team Contributions')           content = <TeamContributions period={period} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
   if (page === 'Procurement')                  content = <MetricPage title="Procurement" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={data.procurement} />;
   if (page === 'Deployments & Installations')  content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity." rows={data.deployments} />;
   if (page === 'Cross Functional Support')     content = <Support period={period} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights period={period} />;
   if (page === 'Activity Feed')                content = <ActivityFeed period={period} supportLogs={supportLogs} />;
-  if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} />;
+  if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} />;
 
   return (
     <Shell
