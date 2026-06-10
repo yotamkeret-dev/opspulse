@@ -1,5 +1,142 @@
 export type Period = 'weekly' | 'monthly' | 'quarterly';
 
+// ─── Historical Time Filter ────────────────────────────────────────────────
+
+export type PeriodType = 'week' | 'month' | 'quarter';
+
+export interface TimeFilter {
+  periodType:      PeriodType;
+  selectedYear:    number;
+  selectedWeek:    number;    // ISO 1-53, used when periodType='week'
+  selectedMonth:   number;    // 1-12,    used when periodType='month'
+  selectedQuarter: number;    // 1-4,     used when periodType='quarter'
+}
+
+export const MONTH_NAMES = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+] as const;
+
+function isoWeekNum(date: Date): number {
+  const thu = new Date(date);
+  thu.setDate(date.getDate() + 4 - (date.getDay() || 7));
+  const yr  = new Date(thu.getFullYear(), 0, 1);
+  return Math.ceil(((thu.getTime() - yr.getTime()) / 86400000 + 1) / 7);
+}
+
+function isoWeekRange(year: number, week: number): { start: Date; end: Date } {
+  const jan4   = new Date(year, 0, 4);
+  const dow    = jan4.getDay() || 7;
+  const mon    = new Date(jan4);
+  mon.setDate(jan4.getDate() - dow + 1);          // Monday of ISO week 1
+  const start  = new Date(mon);
+  start.setDate(mon.getDate() + (week - 1) * 7);  // Monday of target week
+  const end    = new Date(start);
+  end.setDate(start.getDate() + 6);               // Sunday of target week
+  return { start, end };
+}
+
+export function getDateRangeForFilter(tf: TimeFilter): { start: Date; end: Date } {
+  if (tf.periodType === 'week') return isoWeekRange(tf.selectedYear, tf.selectedWeek);
+  if (tf.periodType === 'month') return {
+    start: new Date(tf.selectedYear, tf.selectedMonth - 1, 1),
+    end:   new Date(tf.selectedYear, tf.selectedMonth,     0),
+  };
+  // quarter
+  const qStart = (tf.selectedQuarter - 1) * 3;
+  return {
+    start: new Date(tf.selectedYear, qStart,     1),
+    end:   new Date(tf.selectedYear, qStart + 3, 0),
+  };
+}
+
+export function filterLogsByTimeFilter(logs: SupportLog[], tf: TimeFilter): SupportLog[] {
+  const { start, end } = getDateRangeForFilter(tf);
+  end.setHours(23, 59, 59, 999);
+  return logs.filter(l => {
+    if (!l.date) return false;
+    const d = new Date(l.date + 'T00:00:00');
+    return d >= start && d <= end;
+  });
+}
+
+export function getTimeFilterLabel(tf: TimeFilter): string {
+  if (tf.periodType === 'week') {
+    const { start, end } = isoWeekRange(tf.selectedYear, tf.selectedWeek);
+    const fmt = (d: Date) => `${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
+    return `W${String(tf.selectedWeek).padStart(2, '0')} · ${fmt(start)}–${fmt(end)}, ${tf.selectedYear}`;
+  }
+  if (tf.periodType === 'month') return `${MONTH_NAMES[tf.selectedMonth - 1]} ${tf.selectedYear}`;
+  return `Q${tf.selectedQuarter} ${tf.selectedYear}`;
+}
+
+export function currentTimeFilter(): TimeFilter {
+  const now = new Date();
+  return {
+    periodType:      'week',
+    selectedYear:    now.getFullYear(),
+    selectedWeek:    isoWeekNum(now),
+    selectedMonth:   now.getMonth() + 1,
+    selectedQuarter: Math.ceil((now.getMonth() + 1) / 3),
+  };
+}
+
+// ─── Executive Dashboard sections ─────────────────────────────────────────
+
+export type DashboardKpi = {
+  label:          string;
+  value:          string;
+  note:           string;
+  kpiRecordKey?:  string; // when set, card opens the kpiRecords drill-down panel
+};
+
+export type DashboardSection = {
+  title: string;
+  kpis:  DashboardKpi[];
+};
+
+export const dashboardSections: DashboardSection[] = [
+  {
+    title: 'Production',
+    kpis: [
+      { label: 'Ready to Ship at BAZ',    value: '14', note: 'Packed and awaiting final release'       },
+      { label: 'Systems Waiting for ATP', value:  '6', note: 'Pending approval to proceed'            },
+      { label: 'Systems After ATP',       value:  '9', note: 'ATP approved, in preparation'           },
+    ],
+  },
+  {
+    title: 'Operations',
+    kpis: [
+      { label: 'Systems Shipped',         value: '32', note: 'Full systems, replacements and upgrades', kpiRecordKey: 'Systems Shipped'          },
+      { label: 'Installations Completed', value: '11', note: 'Salesforce source',                        kpiRecordKey: 'Installations Completed'  },
+      { label: 'Spares Shipped',          value: '46', note: 'Screens, switches, computers and kits',    kpiRecordKey: 'Spare Parts Sent'         },
+    ],
+  },
+  {
+    title: 'Procurement Activity',
+    kpis: [
+      { label: 'PO Created',              value:  '74', note: 'Oracle source',                          kpiRecordKey: 'PO Created'               },
+      { label: 'Emergency Requests',      value:  '19', note: 'Short-notice requests across departments'                                          },
+      { label: 'Supplier Payments',       value: '$284K', note: 'Processed together with Finance',      kpiRecordKey: 'Procurement Activity'     },
+    ],
+  },
+];
+
+// ─── Procurement Record (DB-migration ready) ───────────────────────────────
+// Future Supabase table: procurement_records
+// Columns: id (text), po_number (text), supplier (text), amount_usd (numeric),
+//          date (date), owner (text), status (text), category (text), employee_id (text)
+export type ProcurementRecord = {
+  id:         string;
+  poNumber:   string;   // → po_number
+  supplier:   string;
+  amountUsd:  number;   // → amount_usd (numeric)
+  date:       string;   // YYYY-MM-DD → date
+  owner:      string;
+  status:     'approved' | 'pending-approval' | 'cancelled';
+  category?:  string;   // 'Standard' | 'Emergency' | 'Framework'
+};
+
 export const timeRangeData = {
   weekly: {
     label: 'W22 · May 26 – Jun 1',

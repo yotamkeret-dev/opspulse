@@ -2,10 +2,17 @@
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
-  ACTIVITY_CATEGORIES, KPIRecord, Period, SupportLog, TeamMember,
-  filterLogsByPeriod, kpiRecords, seedSupportLogs,
+  ACTIVITY_CATEGORIES, DashboardKpi, KPIRecord, MONTH_NAMES, Period, PeriodType,
+  SupportLog, TeamMember, TimeFilter,
+  currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod,
+  getTimeFilterLabel, kpiRecords, seedSupportLogs,
   teamMembers, timeRangeData,
 } from './data/mock';
+
+// Maps the new TimeFilter to the legacy Period for sub-pages that still use mock data.
+function timeFilterToPeriod(tf: TimeFilter): Period {
+  return tf.periodType === 'week' ? 'weekly' : tf.periodType === 'month' ? 'monthly' : 'quarterly';
+}
 import { createClient } from '@/lib/supabase/client';
 
 // ─── Mode flag ─────────────────────────────────────────────────────────────
@@ -145,21 +152,57 @@ function KPIGrid({ items, onKpiClick }: { items: KPIItem[]; onKpiClick: (item: K
   );
 }
 
-function TimeFilter({ period, setPeriod }: { period: Period; setPeriod: (p: Period) => void }) {
+const FILTER_YEARS = (() => {
+  const y = new Date().getFullYear();
+  return [y - 1, y, y + 1].filter(x => x >= 2024);
+})();
+
+function HistoricalTimeFilter({ value, onChange }: { value: TimeFilter; onChange: (tf: TimeFilter) => void }) {
+  const set = (patch: Partial<TimeFilter>) => onChange({ ...value, ...patch });
   return (
-    <div className="time-filter">
-      {(['weekly', 'monthly', 'quarterly'] as Period[]).map(o => (
-        <button key={o} className={o === period ? 'active' : ''} onClick={() => setPeriod(o)}>
-          {o.charAt(0).toUpperCase() + o.slice(1)}
-        </button>
-      ))}
+    <div className="hist-filter">
+      <div className="time-filter">
+        {(['week', 'month', 'quarter'] as PeriodType[]).map(pt => (
+          <button key={pt} className={value.periodType === pt ? 'active' : ''} onClick={() => set({ periodType: pt })}>
+            {pt.charAt(0).toUpperCase() + pt.slice(1)}
+          </button>
+        ))}
+      </div>
+
+      <select className="hist-select" value={value.selectedYear} onChange={e => set({ selectedYear: +e.target.value })}>
+        {FILTER_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+      </select>
+
+      {value.periodType === 'week' && (
+        <select className="hist-select" value={value.selectedWeek} onChange={e => set({ selectedWeek: +e.target.value })}>
+          {Array.from({ length: 53 }, (_, i) => i + 1).map(w => (
+            <option key={w} value={w}>W{String(w).padStart(2, '0')}</option>
+          ))}
+        </select>
+      )}
+
+      {value.periodType === 'month' && (
+        <select className="hist-select" value={value.selectedMonth} onChange={e => set({ selectedMonth: +e.target.value })}>
+          {MONTH_NAMES.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+        </select>
+      )}
+
+      {value.periodType === 'quarter' && (
+        <div className="time-filter">
+          {[1, 2, 3, 4].map(q => (
+            <button key={q} className={value.selectedQuarter === q ? 'active' : ''} onClick={() => set({ selectedQuarter: q })}>
+              Q{q}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Shell({ page, setPage, period, setPeriod, authEmail, onSignOut, children }: {
+function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSignOut, children }: {
   page: string; setPage: (p: string) => void;
-  period: Period; setPeriod: (p: Period) => void;
+  timeFilter: TimeFilter; onTimeFilterChange: (tf: TimeFilter) => void;
   authEmail?: string;
   onSignOut?: () => void;
   children: React.ReactNode;
@@ -186,8 +229,8 @@ function Shell({ page, setPage, period, setPeriod, authEmail, onSignOut, childre
             <div className="small">Orca Operations Intelligence Platform</div>
           </div>
           <div className="topbar-right">
-            <TimeFilter period={period} setPeriod={setPeriod} />
-            <span className="badge">{timeRangeData[period].label}</span>
+            <HistoricalTimeFilter value={timeFilter} onChange={onTimeFilterChange} />
+            <span className="badge">{getTimeFilterLabel(timeFilter)}</span>
             {DEMO_MODE && <span className="badge badge-demo">Demo</span>}
             {!DEMO_MODE && authEmail && (
               <div className="auth-user">
@@ -213,9 +256,11 @@ const STATUS_COLORS: Record<string, string> = {
   'customs-hold': 'status-blocked',
 };
 
-function KPIDetailPanel({ kpi, period, onClose }: { kpi: KPIItem; period: Period; onClose: () => void }) {
-  const records: KPIRecord[] = kpiRecords[kpi.label]?.[period] ?? [];
-  const periodLabel = timeRangeData[period].label;
+function KPIDetailPanel({ kpi, timeFilter, onClose }: { kpi: DashboardKpi; timeFilter: TimeFilter; onClose: () => void }) {
+  const period      = timeFilterToPeriod(timeFilter);
+  const lookupKey   = kpi.kpiRecordKey ?? kpi.label;
+  const records: KPIRecord[] = kpiRecords[lookupKey]?.[period] ?? [];
+  const periodLabel = getTimeFilterLabel(timeFilter);
   const counterpartyHeader = records[0]?.counterpartyType ?? 'Counterparty';
 
   useEffect(() => {
@@ -231,9 +276,7 @@ function KPIDetailPanel({ kpi, period, onClose }: { kpi: KPIItem; period: Period
         <div className="panel-header">
           <div>
             <h3>{kpi.label}</h3>
-            <div className="small" style={{ marginTop: 4 }}>
-              {records.length} record{records.length !== 1 ? 's' : ''} · {periodLabel}
-            </div>
+            <div className="small" style={{ marginTop: 4 }}>{records.length} record{records.length !== 1 ? 's' : ''} · {periodLabel}</div>
           </div>
           <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
@@ -277,15 +320,13 @@ function KPIDetailPanel({ kpi, period, onClose }: { kpi: KPIItem; period: Period
 
 // ─── Team Member Contribution Panel (Last Updates on Executive Dashboard) ──
 
-function TeamMemberPanel({ memberName, period, supportLogs, onClose }: {
-  memberName: string; period: Period; supportLogs: SupportLog[]; onClose: () => void;
+function TeamMemberPanel({ memberName, timeFilter, supportLogs, onClose }: {
+  memberName: string; timeFilter: TimeFilter; supportLogs: SupportLog[]; onClose: () => void;
 }) {
-  const logs = filterLogsByPeriod(supportLogs, period).filter(l => l.employeeName === memberName);
+  const logs = filterLogsByTimeFilter(supportLogs, timeFilter).filter(l => l.employeeName === memberName);
   const hours = logs.reduce((s, l) => s + l.hours, 0);
   const depts = [...new Set(logs.map(l => l.department))];
   const byDept = buildSupportByDept(logs);
-  const periodWord = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'quarter';
-
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', h);
@@ -300,7 +341,7 @@ function TeamMemberPanel({ memberName, period, supportLogs, onClose }: {
           <div>
             <h3>{memberName}</h3>
             <div className="small" style={{ marginTop: 4 }}>
-              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {timeRangeData[period].label}
+              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {getTimeFilterLabel(timeFilter)}
             </div>
           </div>
           <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
@@ -309,7 +350,7 @@ function TeamMemberPanel({ memberName, period, supportLogs, onClose }: {
           {logs.length === 0 ? (
             <div className="panel-empty">
               <div className="panel-empty-icon">📊</div>
-              <div>No contributions logged this {periodWord}</div>
+              <div>No contributions logged for this period</div>
             </div>
           ) : (
             <>
@@ -356,14 +397,14 @@ function TeamMemberPanel({ memberName, period, supportLogs, onClose }: {
 
 // ─── Employee Contribution Panel (Team Contributions page) ─────────────────
 
-function EmployeePanel({ member, period, supportLogs, onClose }: {
-  member: TeamMember; period: Period; supportLogs: SupportLog[]; onClose: () => void;
+function EmployeePanel({ member, timeFilter, supportLogs, onClose }: {
+  member: TeamMember; timeFilter: TimeFilter; supportLogs: SupportLog[]; onClose: () => void;
 }) {
-  const logs = filterLogsByPeriod(supportLogs, period).filter(l => l.employeeId === member.id);
+  // Match by name for compatibility with both slug-id and email-id records
+  const logs = filterLogsByTimeFilter(supportLogs, timeFilter).filter(l => l.employeeName === member.name);
   const hours = logs.reduce((s, l) => s + l.hours, 0);
   const depts = [...new Set(logs.map(l => l.department))];
   const byDept = buildSupportByDept(logs);
-  const periodWord = period === 'weekly' ? 'week' : period === 'monthly' ? 'month' : 'quarter';
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -380,7 +421,7 @@ function EmployeePanel({ member, period, supportLogs, onClose }: {
             <h3>{member.name}</h3>
             <div className="small" style={{ marginTop: 2 }}>{member.role}</div>
             <div className="small" style={{ marginTop: 4 }}>
-              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {timeRangeData[period].label}
+              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {getTimeFilterLabel(timeFilter)}
             </div>
           </div>
           <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
@@ -389,7 +430,7 @@ function EmployeePanel({ member, period, supportLogs, onClose }: {
           {logs.length === 0 ? (
             <div className="panel-empty">
               <div className="panel-empty-icon">📊</div>
-              <div>No contributions logged this {periodWord}</div>
+              <div>No contributions logged for this period</div>
             </div>
           ) : (
             <>
@@ -436,9 +477,9 @@ function EmployeePanel({ member, period, supportLogs, onClose }: {
 
 // ─── Team Contributions page ───────────────────────────────────────────────
 
-function TeamContributions({ period, supportLogs, activeTeamMembers }: { period: Period; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
+function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
-  const filtered = filterLogsByPeriod(supportLogs, period);
+  const filtered = filterLogsByTimeFilter(supportLogs, timeFilter);
 
   const memberStats = activeTeamMembers.map(m => {
     // Match by name — works for both slug-id (legacy) and email-id (Supabase) records
@@ -457,12 +498,12 @@ function TeamContributions({ period, supportLogs, activeTeamMembers }: { period:
   return (
     <>
       {selectedMember && (
-        <EmployeePanel member={selectedMember} period={period} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />
+        <EmployeePanel member={selectedMember} timeFilter={timeFilter} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />
       )}
 
       <div className="page-header">
         <h2>Team Contributions</h2>
-        <div className="small">Operations team impact · {timeRangeData[period].label}</div>
+        <div className="small">Operations team impact · {getTimeFilterLabel(timeFilter)}</div>
       </div>
 
       <div className="grid kpis">
@@ -529,35 +570,51 @@ function TeamContributions({ period, supportLogs, activeTeamMembers }: { period:
 
 // ─── Executive Dashboard ───────────────────────────────────────────────────
 
-function Executive({ period, supportLogs, activeTeamMembers }: { period: Period; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
-  const data = timeRangeData[period];
-  const [selectedKpi, setSelectedKpi]       = useState<KPIItem | null>(null);
+function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
+  const [selectedKpi,    setSelectedKpi]    = useState<DashboardKpi | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
 
-  const openKpi    = (kpi: KPIItem) => { setSelectedMember(null); setSelectedKpi(kpi); };
-  const openMember = (name: string) => { setSelectedKpi(null); setSelectedMember(name); };
+  const openKpi    = (kpi: DashboardKpi) => { setSelectedMember(null); setSelectedKpi(kpi); };
+  const openMember = (name: string)      => { setSelectedKpi(null); setSelectedMember(name); };
 
-  // Derive live metrics from SupportLog
-  const filtered        = filterLogsByPeriod(supportLogs, period);
-  const derivedActivities = filtered.length;
-  const derivedHours    = filtered.reduce((s, l) => s + l.hours, 0);
-  const derivedSupport  = buildSupportByDept(filtered);
-
-  // Override two KPI values with live derived data
-  const kpis = data.kpis.map(k => {
-    if (k.label === 'Activities Completed')      return { ...k, value: String(derivedActivities) };
-    if (k.label === 'Cross-Team Support Hours')  return { ...k, value: `${derivedHours}h` };
-    return k;
-  });
+  // Derive live support metrics from SupportLog
+  const filtered     = filterLogsByTimeFilter(supportLogs, timeFilter);
+  const derivedHours = filtered.reduce((s, l) => s + l.hours, 0);
+  const derivedSupport = buildSupportByDept(filtered);
 
   return (
     <>
-      {selectedKpi    && <KPIDetailPanel kpi={selectedKpi} period={period} onClose={() => setSelectedKpi(null)} />}
-      {selectedMember && <TeamMemberPanel memberName={selectedMember} period={period} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
+      {selectedKpi    && <KPIDetailPanel kpi={selectedKpi} timeFilter={timeFilter} onClose={() => setSelectedKpi(null)} />}
+      {selectedMember && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
 
-      <KPIGrid items={kpis} onKpiClick={openKpi} />
+      {/* ── Three operational sections ───────────────────────────────── */}
+      {dashboardSections.map(section => (
+        <div key={section.title} style={{ marginBottom: 4 }}>
+          <div className="dash-section-header">{section.title}</div>
+          <div className="grid three">
+            {section.kpis.map(kpi => {
+              const clickable = Boolean(kpi.kpiRecordKey);
+              return (
+                <div
+                  key={kpi.label}
+                  className={`card${clickable ? ' kpi-clickable' : ''}`}
+                  onClick={clickable ? () => openKpi(kpi) : undefined}
+                  role={clickable ? 'button' : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  onKeyDown={clickable ? e => e.key === 'Enter' && openKpi(kpi) : undefined}
+                >
+                  <div className="kpi-label">{kpi.label}</div>
+                  <div className="kpi-value">{kpi.value}</div>
+                  <div className="small">{kpi.note}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
-      <div className="grid two">
+      {/* ── Live support data ────────────────────────────────────────── */}
+      <div className="grid two" style={{ marginTop: 8 }}>
         <div className="card">
           <h2 className="section-title">Team Last Updates</h2>
           <div className="team-pulse-list">
@@ -586,30 +643,24 @@ function Executive({ period, supportLogs, activeTeamMembers }: { period: Period;
 
         <div className="card">
           <h2 className="section-title">Support Hours by Department</h2>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={derivedSupport} layout="vertical" margin={{ top: 4, right: 54, left: 0, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.07)" />
-              <XAxis type="number" stroke="var(--color-muted)" tick={{ fontSize: 12 }} />
-              <YAxis type="category" dataKey="name" stroke="var(--color-muted)" tick={{ fontSize: 12 }} width={72} />
-              <Tooltip contentStyle={{ background: '#0d192b', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10 }} />
-              <Bar dataKey="hours" fill="var(--color-completed)" radius={[0, 8, 8, 0]}>
-                <LabelList dataKey="hours" position="right" formatter={(v: unknown) => `${v}h`} style={{ fill: '#ffffff', fontWeight: 700, fontSize: 12 }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      <div className="card">
-        <h2 className="section-title">Operational Highlights</h2>
-        <div className="grid two">
-          {data.highlights.slice(0, 6).map(h => (
-            <div className="highlight-item" key={h.title}>
-              <span className="pill">{h.tag}</span>
-              <b>{h.title}</b>
-              <div className="small">{h.text}</div>
+          {derivedSupport.length === 0 ? (
+            <div className="panel-empty" style={{ padding: '32px 0' }}>
+              <div className="panel-empty-icon">📊</div>
+              <div>No support hours logged for this period</div>
             </div>
-          ))}
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={derivedSupport} layout="vertical" margin={{ top: 4, right: 54, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.07)" />
+                <XAxis type="number" stroke="var(--color-muted)" tick={{ fontSize: 12 }} />
+                <YAxis type="category" dataKey="name" stroke="var(--color-muted)" tick={{ fontSize: 12 }} width={72} />
+                <Tooltip contentStyle={{ background: '#0d192b', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10 }} />
+                <Bar dataKey="hours" fill="var(--color-completed)" radius={[0, 8, 8, 0]}>
+                  <LabelList dataKey="hours" position="right" formatter={(v: unknown) => `${v}h`} style={{ fill: '#ffffff', fontWeight: 700, fontSize: 12 }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
     </>
@@ -640,8 +691,8 @@ function MetricPage({ title, intro, rows }: { title: string; intro: string; rows
 
 // ─── Cross Functional Support (fully derived) ──────────────────────────────
 
-function Support({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
-  const filtered = filterLogsByPeriod(supportLogs, period);
+function Support({ timeFilter, supportLogs }: { timeFilter: TimeFilter; supportLogs: SupportLog[] }) {
+  const filtered = filterLogsByTimeFilter(supportLogs, timeFilter);
   const byDept   = buildSupportByDept(filtered);
   const impacts: Record<string, string> = {
     'R&D': 'Urgent builds, testing support',
@@ -657,7 +708,7 @@ function Support({ period, supportLogs }: { period: Period; supportLogs: Support
     <>
       <div className="page-header">
         <h2>Cross Functional Support</h2>
-        <div className="small">Operations support hours by department · {timeRangeData[period].label}</div>
+        <div className="small">Operations support hours by department · {getTimeFilterLabel(timeFilter)}</div>
       </div>
       <div className="card">
         {byDept.length === 0 ? (
@@ -689,13 +740,13 @@ function Support({ period, supportLogs }: { period: Period; supportLogs: Support
 
 // ─── Highlights ────────────────────────────────────────────────────────────
 
-function Highlights({ period }: { period: Period }) {
-  const data = timeRangeData[period];
+function Highlights({ timeFilter }: { timeFilter: TimeFilter }) {
+  const data = timeRangeData[timeFilterToPeriod(timeFilter)];
   return (
     <>
       <div className="page-header">
         <h2>Operational Highlights</h2>
-        <div className="small">Key achievements and delivery milestones · {timeRangeData[period].label}</div>
+        <div className="small">Key achievements and delivery milestones · {getTimeFilterLabel(timeFilter)}</div>
       </div>
       <div className="card highlight">
         {data.highlights.map(h => (
@@ -712,13 +763,13 @@ function Highlights({ period }: { period: Period }) {
 
 // ─── Activity Feed (derived from SupportLog) ───────────────────────────────
 
-function ActivityFeed({ period, supportLogs }: { period: Period; supportLogs: SupportLog[] }) {
-  const logs = filterLogsByPeriod(supportLogs, period);
+function ActivityFeed({ timeFilter, supportLogs }: { timeFilter: TimeFilter; supportLogs: SupportLog[] }) {
+  const logs = filterLogsByTimeFilter(supportLogs, timeFilter);
   return (
     <>
       <div className="page-header">
         <h2>Operations Activity Feed</h2>
-        <div className="small">Live contribution log · {timeRangeData[period].label}</div>
+        <div className="small">Live contribution log · {getTimeFilterLabel(timeFilter)}</div>
       </div>
       {logs.length === 0 ? (
         <div className="card"><div className="panel-empty"><div className="panel-empty-icon">📋</div><div>No activities logged for this period</div></div></div>
@@ -863,8 +914,8 @@ function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: Suppor
 // ─── App ───────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [page, setPage]     = useState('Executive Dashboard');
-  const [period, setPeriod] = useState<Period>('weekly');
+  const [page, setPage]           = useState('Executive Dashboard');
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>(currentTimeFilter);
 
   // ── Demo Mode state ──────────────────────────────────────────────────────
   const [userLogs, setUserLogs] = useState<SupportLog[]>([]);
@@ -967,22 +1018,24 @@ export default function App() {
     );
   }
 
-  const data = timeRangeData[period];
+  // Sub-pages still use mock timeRangeData keyed by legacy Period
+  const period = timeFilterToPeriod(timeFilter);
+  const data   = timeRangeData[period];
 
-  let content = <Executive period={period} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
-  if (page === 'Team Contributions')           content = <TeamContributions period={period} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
+  let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
+  if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
   if (page === 'Procurement')                  content = <MetricPage title="Procurement" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={data.procurement} />;
   if (page === 'Deployments & Installations')  content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity." rows={data.deployments} />;
-  if (page === 'Cross Functional Support')     content = <Support period={period} supportLogs={supportLogs} />;
-  if (page === 'Weekly Highlights')            content = <Highlights period={period} />;
-  if (page === 'Activity Feed')                content = <ActivityFeed period={period} supportLogs={supportLogs} />;
+  if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
+  if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} />;
+  if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} />;
 
   return (
     <Shell
       page={page} setPage={setPage}
-      period={period} setPeriod={setPeriod}
+      timeFilter={timeFilter} onTimeFilterChange={setTimeFilter}
       authEmail={authUser?.email}
       onSignOut={signOut}
     >
