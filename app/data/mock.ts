@@ -230,7 +230,7 @@ export const timeRangeData = {
 };
 
 export const teamPulseStatus = [
-  { name: 'Rami Moskovich',  submitted: true, lastUpdated: null },
+  { name: 'Rami Moscovich',  submitted: true, lastUpdated: null },
   { name: 'Yotam Keret',     submitted: true, lastUpdated: null },
   { name: 'Amir Meiri',      submitted: true, lastUpdated: null },
   { name: 'Yaron Yahbes',    submitted: true, lastUpdated: null },
@@ -529,7 +529,7 @@ export type TeamMember = {
 };
 
 export const teamMembers: TeamMember[] = [
-  { id: 'rami-moskovich',  name: 'Rami Moskovich',  email: 'rami@orca-ai.io',         role: 'Director of Operations' },
+  { id: 'rami-moscovich',  name: 'Rami Moscovich',  email: 'rami@orca-ai.io',         role: 'Director of Operations' },
   { id: 'yotam-keret',     name: 'Yotam Keret',     email: 'yotam.keret@orca-ai.io',  role: 'Operations Specialist' },
   { id: 'amir-meiri',      name: 'Amir Meiri',      email: 'amir.m@orca-ai.io',       role: 'Operations Specialist' },
   { id: 'yaron-yahbes',    name: 'Yaron Yahbes',    email: 'yaron.y@orca-ai.io',      role: 'Operations Specialist' },
