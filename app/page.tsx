@@ -6,7 +6,7 @@ import {
   ACTIVITY_CATEGORIES, DashboardKpi, KPIRecord, MONTH_NAMES, Period, PeriodType,
   ProcurementCategory, ProcurementRecord, PROCUREMENT_CATEGORIES, PROCUREMENT_STATUSES,
   SupportLog, TeamMember, TimeFilter,
-  currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod,
+  currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod, getPreviousPeriod,
   getDateRangeForFilter, getTimeFilterLabel, kpiRecords, mockProcurementRecords, seedSupportLogs,
   teamMembers, timeRangeData,
 } from './data/mock';
@@ -259,7 +259,11 @@ function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSig
   return (
     <div className="shell">
       <aside className="sidebar">
-        <div className="logo">OpsPulse</div>
+        <div className="brand-block">
+          <span className="brand-orca">ORCA</span>
+          <span className="brand-sep">·</span>
+          <span className="brand-product">OpsPulse</span>
+        </div>
         <div className="tagline">Orca Operations Platform</div>
         <div className="nav">
           {pages.map(p => (
@@ -617,13 +621,73 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
   );
 }
 
+// ─── Delta helper ──────────────────────────────────────────────────────────
+
+function formatDelta(current: number, previous: number): {
+  text: string; isPositive: boolean; isNeutral: boolean;
+} {
+  if (current === previous) return { text: '—', isPositive: false, isNeutral: true };
+  const diff = current - previous;
+  return { text: `${diff > 0 ? '+' : ''}${diff} vs prev`, isPositive: diff > 0, isNeutral: false };
+}
+
+// ─── Executive Summary Card ────────────────────────────────────────────────
+
+function ExecSummaryCard({ currentLogs, previousLogs, currentProc, previousProc }: {
+  currentLogs:  SupportLog[];
+  previousLogs: SupportLog[];
+  currentProc:  ProcurementRecord[];
+  previousProc: ProcurementRecord[];
+}) {
+  const c = {
+    activities: currentLogs.length,
+    hours:      currentLogs.reduce((s, l) => s + l.hours, 0),
+    po:         currentProc.filter(r => r.category === 'PO Created').length,
+    emergency:  currentProc.filter(r => r.category === 'Emergency Request').length,
+    payments:   currentProc.filter(r => r.category === 'Supplier Payment').length,
+  };
+  const p = {
+    activities: previousLogs.length,
+    hours:      previousLogs.reduce((s, l) => s + l.hours, 0),
+    po:         previousProc.filter(r => r.category === 'PO Created').length,
+    emergency:  previousProc.filter(r => r.category === 'Emergency Request').length,
+    payments:   previousProc.filter(r => r.category === 'Supplier Payment').length,
+  };
+  const metrics: { label: string; cur: number; prev: number; fmt?: (n: number) => string }[] = [
+    { label: 'Activities',    cur: c.activities, prev: p.activities },
+    { label: 'Support Hours', cur: c.hours,      prev: p.hours,     fmt: n => `${n}h` },
+    { label: 'PO Created',    cur: c.po,         prev: p.po        },
+    { label: 'Emergency',     cur: c.emergency,  prev: p.emergency  },
+    { label: 'Payments',      cur: c.payments,   prev: p.payments   },
+  ];
+  return (
+    <div className="card exec-summary" style={{ marginBottom: 18 }}>
+      <div className="exec-summary-title">Period Summary</div>
+      <div className="exec-summary-grid">
+        {metrics.map(m => {
+          const d = formatDelta(m.cur, m.prev);
+          const cls = `exec-delta ${d.isNeutral ? 'exec-delta-neutral' : d.isPositive ? 'exec-delta-up' : 'exec-delta-down'}`;
+          return (
+            <div key={m.label} className="exec-summary-item">
+              <div className="exec-summary-label">{m.label}</div>
+              <div className="exec-summary-value">{m.fmt ? m.fmt(m.cur) : m.cur}</div>
+              <div className={cls}>{d.text}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Executive Dashboard ───────────────────────────────────────────────────
 
 function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
   const [selectedKpi,          setSelectedKpi]          = useState<DashboardKpi | null>(null);
   const [selectedMember,       setSelectedMember]       = useState<string | null>(null);
   const [selectedProcCategory, setSelectedProcCategory] = useState<ProcurementCategory | null>(null);
-  const [procRecords,          setProcRecords]          = useState<ProcurementRecord[]>([]);
+  const [procRecords,     setProcRecords]     = useState<ProcurementRecord[]>([]);
+  const [prevProcRecords, setPrevProcRecords] = useState<ProcurementRecord[]>([]);
 
   // Maps the three Procurement Activity KPI labels to ProcurementCategory values.
   // Any label in this map routes to ProcurementDrillDown (live data) instead of KPIDetailPanel (mock).
@@ -647,21 +711,26 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
   };
   const openMember = (name: string) => { setSelectedKpi(null); setSelectedProcCategory(null); setSelectedMember(name); };
 
-  // Fetch procurement records for the selected period — drives the Procurement Activity section
+  // Fetch current + previous period procurement in one effect
   useEffect(() => {
-    const { start, end } = getDateRangeForFilter(timeFilter);
-    end.setHours(23, 59, 59, 999);
+    const prev = getPreviousPeriod(timeFilter);
+
+    const filterMock = (tf: typeof timeFilter) => {
+      const { start, end } = getDateRangeForFilter(tf);
+      end.setHours(23, 59, 59, 999);
+      return mockProcurementRecords.filter(r => {
+        if (!r.date) return false;
+        const d = new Date(r.date + 'T00:00:00');
+        return d >= start && d <= end;
+      });
+    };
+
     if (DEMO_MODE) {
-      // Filter mock records client-side so demo mode respects the time filter too
-      setProcRecords(
-        mockProcurementRecords.filter(r => {
-          if (!r.date) return false;
-          const d = new Date(r.date + 'T00:00:00');
-          return d >= start && d <= end;
-        })
-      );
+      setProcRecords(filterMock(timeFilter));
+      setPrevProcRecords(filterMock(prev));
     } else {
       fetchProcurementFromDB(timeFilter).then(setProcRecords);
+      fetchProcurementFromDB(prev).then(setPrevProcRecords);
     }
   }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -677,8 +746,19 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
     'Supplier Payments':  { value: String(procPay.length),   note: procPayTotal > 0 ? `Total $${procPayTotal.toLocaleString()}` : 'No payments this period' },
   };
 
+  // Previous-period procurement deltas
+  const prevProcPO    = prevProcRecords.filter(r => r.category === 'PO Created');
+  const prevProcPay   = prevProcRecords.filter(r => r.category === 'Supplier Payment');
+  const prevProcEmerg = prevProcRecords.filter(r => r.category === 'Emergency Request');
+  const procDeltaMap: Record<string, ReturnType<typeof formatDelta>> = {
+    'PO Created':         formatDelta(procPO.length,    prevProcPO.length),
+    'Emergency Requests': formatDelta(procEmerg.length, prevProcEmerg.length),
+    'Supplier Payments':  formatDelta(procPay.length,   prevProcPay.length),
+  };
+
   // Derive live support metrics from SupportLog
   const filtered       = filterLogsByTimeFilter(supportLogs, timeFilter);
+  const prevFiltered   = filterLogsByTimeFilter(supportLogs, getPreviousPeriod(timeFilter));
   const derivedHours   = filtered.reduce((s, l) => s + l.hours, 0);
   const derivedSupport = buildSupportByDept(filtered);
 
@@ -688,10 +768,20 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
       {selectedProcCategory && <ProcurementDrillDown category={selectedProcCategory} records={procRecords} onClose={() => setSelectedProcCategory(null)} />}
       {selectedMember       && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
 
+      {/* ── Executive Summary ────────────────────────────────────────── */}
+      <ExecSummaryCard
+        currentLogs={filtered}  previousLogs={prevFiltered}
+        currentProc={procRecords} previousProc={prevProcRecords}
+      />
+
       {/* ── Three operational sections ───────────────────────────────── */}
-      {dashboardSections.map(section => (
+      {dashboardSections.map(section => {
+        const accentCls = section.title === 'Production' ? 'section-accent-blue'
+          : section.title === 'Operations' ? 'section-accent-green'
+          : 'section-accent-orange';
+        return (
         <div key={section.title} style={{ marginBottom: 4 }}>
-          <div className="dash-section-header">{section.title}</div>
+          <div className={`dash-section-header ${accentCls}`}>{section.title}</div>
           <div className="grid three">
             {section.kpis.map(kpi => {
               const clickable = Boolean(kpi.kpiRecordKey);
@@ -711,12 +801,21 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
                   <div className="kpi-label">{kpi.label}</div>
                   <div className="kpi-value">{displayValue}</div>
                   <div className="small">{displayNote}</div>
+                  {procDeltaMap[kpi.label] && (() => {
+                    const d = procDeltaMap[kpi.label];
+                    return (
+                      <div className={`card-delta ${d.isNeutral ? 'exec-delta-neutral' : d.isPositive ? 'exec-delta-up' : 'exec-delta-down'}`}>
+                        {d.text}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {/* ── Live support data ────────────────────────────────────────── */}
       <div className="grid two" style={{ marginTop: 8 }}>

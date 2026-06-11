@@ -191,10 +191,58 @@ a { color: inherit; text-decoration: none; }
 .contrib-depts { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
 .contrib-last { color: var(--color-muted); font-size: 12px; margin-top: 4px; }
 
+/* ── Orca brand block in sidebar ─────────────────────────── */
+.brand-block { display: flex; align-items: baseline; gap: 6px; }
+.brand-orca  { font-size: 15px; font-weight: 900; letter-spacing: .08em; color: var(--color-accent); }
+.brand-sep   { color: rgba(255,255,255,.22); font-size: 12px; }
+.brand-product { font-size: 22px; font-weight: 800; letter-spacing: -.04em; color: #e8eef7; }
+
+/* ── ORCA background watermark ───────────────────────────── */
+.main { position: relative; }
+.main::after {
+  content: 'ORCA';
+  position: fixed;
+  bottom: 6%;
+  right: 3%;
+  font-size: 150px;
+  font-weight: 900;
+  letter-spacing: -.05em;
+  line-height: 1;
+  color: rgba(255,255,255,.05);
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+}
+
+/* ── Section header accents ──────────────────────────────── */
+.dash-section-header { border-left: 3px solid transparent; padding-left: 9px; }
+.section-accent-blue   { color: var(--color-accent);    border-left-color: var(--color-accent); }
+.section-accent-green  { color: var(--color-completed); border-left-color: var(--color-completed); }
+.section-accent-orange { color: var(--color-warning);   border-left-color: var(--color-warning); }
+
+/* ── Executive Summary card ──────────────────────────────── */
+.exec-summary { padding: 0; overflow: hidden; }
+.exec-summary-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-muted); padding: 14px 18px 10px; border-bottom: 1px solid var(--color-border); }
+.exec-summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); }
+.exec-summary-item { padding: 14px 16px; border-right: 1px solid var(--color-border); }
+.exec-summary-item:last-child { border-right: none; }
+.exec-summary-label { font-size: 11px; font-weight: 700; color: var(--color-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+.exec-summary-value { font-size: 28px; font-weight: 850; letter-spacing: -.04em; margin-bottom: 4px; }
+
+/* ── Delta indicators ────────────────────────────────────── */
+.exec-delta { font-size: 11px; font-weight: 700; white-space: nowrap; }
+.exec-delta-up      { color: var(--color-completed); }
+.exec-delta-down    { color: var(--color-muted); }
+.exec-delta-neutral { color: rgba(143,163,187,.5); }
+.card-delta { font-size: 11px; font-weight: 700; margin-top: 4px; }
+
 /* Mobile */
 @media (max-width: 980px) {
   .shell { display: block; }
   .sidebar { position: relative; width: auto; height: auto; }
   .kpis, .two, .three { grid-template-columns: 1fr; }
   .topbar { flex-wrap: wrap; }
+  .exec-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .exec-summary-item:nth-child(2n) { border-right: none; }
+  .main::after { font-size: 80px; }
 }

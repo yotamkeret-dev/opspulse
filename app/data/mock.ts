@@ -70,6 +70,22 @@ export function getTimeFilterLabel(tf: TimeFilter): string {
   return `Q${tf.selectedQuarter} ${tf.selectedYear}`;
 }
 
+/** Returns the period immediately before the given TimeFilter. Handles year-boundary rollovers. */
+export function getPreviousPeriod(tf: TimeFilter): TimeFilter {
+  if (tf.periodType === 'week') {
+    if (tf.selectedWeek > 1) return { ...tf, selectedWeek: tf.selectedWeek - 1 };
+    // W1 → previous year's last week (ISO years have either 52 or 53 weeks; 52 is safe default)
+    return { ...tf, selectedYear: tf.selectedYear - 1, selectedWeek: 52 };
+  }
+  if (tf.periodType === 'month') {
+    if (tf.selectedMonth > 1) return { ...tf, selectedMonth: tf.selectedMonth - 1 };
+    return { ...tf, selectedYear: tf.selectedYear - 1, selectedMonth: 12 };
+  }
+  // quarter
+  if (tf.selectedQuarter > 1) return { ...tf, selectedQuarter: tf.selectedQuarter - 1 };
+  return { ...tf, selectedYear: tf.selectedYear - 1, selectedQuarter: 4 };
+}
+
 export function currentTimeFilter(): TimeFilter {
   const now = new Date();
   return {
