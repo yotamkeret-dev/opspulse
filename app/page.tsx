@@ -154,7 +154,7 @@ async function insertProcurementToDB(record: ProcurementRecord): Promise<void> {
 
 const pages = [
   'Executive Dashboard', 'Team Contributions', 'Logistics', 'Procurement',
-  'Deployments & Installations', 'Cross Functional Support',
+  'Cross Functional Support',
   'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity',
 ];
 
@@ -1424,7 +1424,6 @@ export default function App() {
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
   if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} />;
-  if (page === 'Deployments & Installations')  content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity." rows={data.deployments} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} />;
   if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} supportLogs={supportLogs} />;

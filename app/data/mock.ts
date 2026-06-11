@@ -199,10 +199,6 @@ export const timeRangeData = {
       { metric: 'Supplier Payments', value: '$284K', detail: 'Processed together with Finance' },
       { metric: 'Estimated Cost Savings', value: '$18.5K', detail: 'Negotiation, supplier alternatives and bulk planning' },
     ],
-    deployments: [
-      { metric: 'Installations Completed', value: '11', detail: 'Completed end-to-end' },
-      { metric: 'Maintenance Activities', value: '16', detail: 'Ad-hoc and planned customer work' },
-    ],
     activityByCategory: [
       { name: 'Logistics', value: 32 },
       { name: 'Procurement', value: 41 },
@@ -273,10 +269,6 @@ export const timeRangeData = {
       { metric: 'Supplier Payments', value: '$1.1M', detail: 'Processed together with Finance' },
       { metric: 'Estimated Cost Savings', value: '$76K', detail: 'Negotiation, supplier alternatives and bulk planning' },
     ],
-    deployments: [
-      { metric: 'Installations Completed', value: '43', detail: 'Completed end-to-end' },
-      { metric: 'Maintenance Activities', value: '62', detail: 'Ad-hoc and planned customer work' },
-    ],
     activityByCategory: [
       { name: 'Logistics', value: 128 },
       { name: 'Procurement', value: 164 },
@@ -346,10 +338,6 @@ export const timeRangeData = {
       { metric: 'Emergency Requests', value: '218', detail: 'Short-notice requests for R&D, Defence and Product' },
       { metric: 'Supplier Payments', value: '$3.2M', detail: 'Processed together with Finance' },
       { metric: 'Estimated Cost Savings', value: '$228K', detail: 'Negotiation, supplier alternatives and bulk planning' },
-    ],
-    deployments: [
-      { metric: 'Installations Completed', value: '127', detail: 'Completed end-to-end' },
-      { metric: 'Maintenance Activities', value: '187', detail: 'Ad-hoc and planned customer work' },
     ],
     activityByCategory: [
       { name: 'Logistics', value: 384 },
