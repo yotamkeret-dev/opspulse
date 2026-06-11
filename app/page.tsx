@@ -1,9 +1,11 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
 import {
   ACTIVITY_CATEGORIES, DashboardKpi, KPIRecord, MONTH_NAMES, Period, PeriodType,
+  OperationsCategory, OperationsRecord, OPERATIONS_CATEGORIES, OPERATIONS_STATUSES, mockOperationsRecords,
+  OperationsStatus,
   ProcurementCategory, ProcurementRecord, PROCUREMENT_CATEGORIES, PROCUREMENT_STATUSES,
   SupportLog, TeamMember, TimeFilter,
   currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod, getPreviousPeriod,
@@ -77,7 +79,13 @@ async function fetchLogsFromDB(): Promise<SupportLog[]> {
     .from('support_logs')
     .select('*')
     .order('created_at', { ascending: false });
-  if (error) { console.error('fetchLogs:', error.message); return []; }
+  if (error) {
+    // Re-throw so the caller (bootstrap) knows the fetch failed.
+    // A silent return [] here caused existing submissions to vanish on refresh
+    // because setDbLogs([]) wiped local state with no user-visible error.
+    console.error('fetchLogs error:', error.code, error.message, error.details);
+    throw new Error(`Failed to load activities: ${error.message}`);
+  }
   return (data ?? []).map(rowToLog);
 }
 
@@ -87,21 +95,34 @@ async function insertLogToDB(
   userEmail: string
 ): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from('support_logs').insert({
-    id:             log.id,
-    employee_id:    log.employeeId,
-    employee_name:  log.employeeName,
-    employee_email: userEmail,
-    department:     log.department,
-    category:       log.category,
-    title:          log.title,
-    hours:          log.hours,
-    date:           log.date,
-    week:           log.week,
-    notes:          log.notes,
-    created_by:     userId,
-  });
+  // Chain .select('id') so we can verify the row was actually committed.
+  // Supabase returns { data: null, error: null } when an RLS INSERT policy
+  // silently blocks the write — without .select() that looks like success.
+  const { data, error } = await supabase
+    .from('support_logs')
+    .insert({
+      id:             log.id,
+      employee_id:    log.employeeId,
+      employee_name:  log.employeeName,
+      employee_email: userEmail,
+      department:     log.department,
+      category:       log.category,
+      title:          log.title,
+      hours:          log.hours,
+      date:           log.date,
+      week:           log.week,
+      notes:          log.notes,
+      created_by:     userId,
+    })
+    .select('id');
+
   if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error(
+      'Activity was not saved — the record was silently rejected. ' +
+      'Check that the support_logs RLS policies are correctly applied in Supabase.'
+    );
+  }
 }
 
 // ─── Procurement DB helpers ────────────────────────────────────────────────
@@ -151,24 +172,124 @@ async function insertProcurementToDB(record: ProcurementRecord): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+// ─── Operations DB helpers ─────────────────────────────────────────────────
+
+function rowToOperationsRecord(row: Record<string, unknown>): OperationsRecord {
+  return {
+    id:           String(row.id),
+    employeeId:   String(row.employee_id),
+    employeeName: String(row.employee_name),
+    date:         String(row.activity_date),
+    category:     String(row.category) as OperationsRecord['category'],
+    quantity:     Number(row.quantity),
+    notes:        String(row.notes ?? ''),
+    status:       String(row.status)   as OperationsRecord['status'],
+  };
+}
+
+async function fetchOperationsFromDB(tf: TimeFilter): Promise<OperationsRecord[]> {
+  const supabase = createClient();
+  const { start, end } = getDateRangeForFilter(tf);
+  const { data, error } = await supabase
+    .from('operations_records')
+    .select('*')
+    .gte('activity_date', start.toISOString().slice(0, 10))
+    .lte('activity_date', end.toISOString().slice(0, 10))
+    .order('activity_date', { ascending: false });
+  if (error) { console.error('fetchOperations:', error.message); return []; }
+  return (data ?? []).map(rowToOperationsRecord);
+}
+
+async function insertOperationsToDB(record: OperationsRecord): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('operations_records').insert({
+    id:            record.id,
+    employee_id:   record.employeeId,
+    employee_name: record.employeeName,
+    activity_date: record.date,
+    category:      record.category,
+    quantity:      record.quantity,
+    notes:         record.notes,
+    status:        record.status,
+  });
+  if (error) throw new Error(error.message);
+}
+
+// ─── Update DB helpers (edit own records) ──────────────────────────────────
+
+async function updateSupportLogInDB(id: string, patch: Partial<SupportLog>): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('support_logs')
+    .update({
+      department: patch.department,
+      category:   patch.category,
+      title:      patch.title,
+      hours:      patch.hours,
+      date:       patch.date,
+      week:       patch.week,
+      notes:      patch.notes,
+    })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+async function updateProcurementInDB(id: string, patch: Partial<ProcurementRecord>): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('procurement_records')
+    .update({
+      po_number:     patch.poNumber ?? '',
+      supplier:      patch.supplier,
+      amount_usd:    patch.amountUsd,
+      category:      patch.category,
+      status:        patch.status,
+      notes:         patch.notes,
+      activity_date: patch.date,
+    })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+async function updateOperationsInDB(id: string, patch: Partial<OperationsRecord>): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('operations_records')
+    .update({
+      category:      patch.category,
+      quantity:      patch.quantity,
+      status:        patch.status,
+      notes:         patch.notes,
+      activity_date: patch.date,
+    })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
 
 const pages = [
-  'Executive Dashboard', 'Team Contributions', 'Logistics', 'Procurement',
-  'Cross Functional Support',
-  'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity',
+  'Executive Dashboard', 'Team Contributions', 'Logistics', 'Procurement', 'Operations',
+  'Cross Functional Support', 'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity',
 ];
 
 type KPIItem = { label: string; value: string; note: string; priority: number };
 
-// Returns the ISO 8601 week tag for a YYYY-MM-DD date string, e.g. "W23".
-// Used as metadata on SupportLog entries (not used for filtering — see filterLogsByPeriod).
+// Returns the Israeli business week tag for a YYYY-MM-DD date string, e.g. "W24".
+// Israeli week: Sunday = start, Saturday = end.
+// Year assignment uses Thursday of the week (same as ISO).
 function getWeekTag(dateStr: string): string {
-  const d = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
-  // Find the Thursday of the ISO week (ISO weeks start on Monday; week 1 contains the first Thursday)
-  const thursday = new Date(d);
-  thursday.setDate(d.getDate() + 4 - (d.getDay() || 7));
-  const yearStart = new Date(thursday.getFullYear(), 0, 1);
-  const weekNum   = Math.ceil(((thursday.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  const d   = dateStr ? new Date(dateStr + 'T00:00:00') : new Date();
+  // Thursday of this Sunday-start week
+  const thu = new Date(d);
+  thu.setDate(d.getDate() - d.getDay() + 4);
+  const year    = thu.getFullYear();
+  // Sunday of this week
+  const sun = new Date(d);
+  sun.setDate(d.getDate() - d.getDay());
+  // Sunday of the first week of `year`
+  const jan1    = new Date(year, 0, 1);
+  const jan1Sun = new Date(jan1);
+  jan1Sun.setDate(jan1.getDate() - jan1.getDay());
+  const weekNum = Math.round((sun.getTime() - jan1Sun.getTime()) / (7 * 86400000)) + 1;
   return `W${String(weekNum).padStart(2, '0')}`;
 }
 
@@ -693,8 +814,11 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
   const [selectedKpi,          setSelectedKpi]          = useState<DashboardKpi | null>(null);
   const [selectedMember,       setSelectedMember]       = useState<string | null>(null);
   const [selectedProcCategory, setSelectedProcCategory] = useState<ProcurementCategory | null>(null);
+  const [selectedOpsCategory,  setSelectedOpsCategory]  = useState<OperationsCategory | null>(null);
   const [procRecords,     setProcRecords]     = useState<ProcurementRecord[]>([]);
   const [prevProcRecords, setPrevProcRecords] = useState<ProcurementRecord[]>([]);
+  const [opsRecords,      setOpsRecords]      = useState<OperationsRecord[]>([]);
+  const [prevOpsRecords,  setPrevOpsRecords]  = useState<OperationsRecord[]>([]);
 
   // Maps the three Procurement Activity KPI labels to ProcurementCategory values.
   // Any label in this map routes to ProcurementDrillDown (live data) instead of KPIDetailPanel (mock).
@@ -703,20 +827,28 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
     'Emergency Requests': 'Emergency Request',
     'Supplier Payments':  'Supplier Payment',
   };
+  const OPS_DRILL_MAP: Partial<Record<string, OperationsCategory>> = {
+    'Systems Shipped':         'Systems Shipped',
+    'Installations Completed': 'Installations Completed',
+    'Spares Shipped':          'Spares Shipped',
+  };
 
   const openKpi = (kpi: DashboardKpi) => {
     setSelectedMember(null);
     const procCat = PROC_DRILL_MAP[kpi.label];
+    const opsCat  = OPS_DRILL_MAP[kpi.label];
     if (procCat) {
-      // Procurement card → live ProcurementDrillDown, not mock KPIDetailPanel
-      setSelectedKpi(null);
+      setSelectedKpi(null); setSelectedOpsCategory(null);
       setSelectedProcCategory(procCat);
+    } else if (opsCat) {
+      setSelectedKpi(null); setSelectedProcCategory(null);
+      setSelectedOpsCategory(opsCat);
     } else {
-      setSelectedProcCategory(null);
+      setSelectedProcCategory(null); setSelectedOpsCategory(null);
       setSelectedKpi(kpi);
     }
   };
-  const openMember = (name: string) => { setSelectedKpi(null); setSelectedProcCategory(null); setSelectedMember(name); };
+  const openMember = (name: string) => { setSelectedKpi(null); setSelectedProcCategory(null); setSelectedOpsCategory(null); setSelectedMember(name); };
 
   // Fetch current + previous period procurement in one effect
   useEffect(() => {
@@ -732,12 +864,26 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
       });
     };
 
+    const filterMockOps = (tf: typeof timeFilter) => {
+      const { start, end } = getDateRangeForFilter(tf);
+      end.setHours(23, 59, 59, 999);
+      return mockOperationsRecords.filter(r => {
+        if (!r.date) return false;
+        const d = new Date(r.date + 'T00:00:00');
+        return d >= start && d <= end;
+      });
+    };
+
     if (DEMO_MODE) {
       setProcRecords(filterMock(timeFilter));
       setPrevProcRecords(filterMock(prev));
+      setOpsRecords(filterMockOps(timeFilter));
+      setPrevOpsRecords(filterMockOps(prev));
     } else {
       fetchProcurementFromDB(timeFilter).then(setProcRecords);
       fetchProcurementFromDB(prev).then(setPrevProcRecords);
+      fetchOperationsFromDB(timeFilter).then(setOpsRecords);
+      fetchOperationsFromDB(prev).then(setPrevOpsRecords);
     }
   }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -763,6 +909,20 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
     'Supplier Payments':  formatDelta(procPay.length,   prevProcPay.length),
   };
 
+  // Derive live Operations KPI values — quantity sums (not record counts)
+  const opsQty = (cat: OperationsCategory) => opsRecords.filter(r => r.category === cat).reduce((s, r) => s + r.quantity, 0);
+  const prevOpsQty = (cat: OperationsCategory) => prevOpsRecords.filter(r => r.category === cat).reduce((s, r) => s + r.quantity, 0);
+  const opsKpiOverrides: Record<string, { value: string; note: string }> = {
+    'Systems Shipped':         { value: String(opsQty('Systems Shipped')),         note: opsQty('Systems Shipped')         > 0 ? `${opsRecords.filter(r => r.category === 'Systems Shipped').length} records`         : 'No records this period' },
+    'Installations Completed': { value: String(opsQty('Installations Completed')), note: opsQty('Installations Completed') > 0 ? `${opsRecords.filter(r => r.category === 'Installations Completed').length} records` : 'No records this period' },
+    'Spares Shipped':          { value: String(opsQty('Spares Shipped')),           note: opsQty('Spares Shipped')           > 0 ? `${opsRecords.filter(r => r.category === 'Spares Shipped').length} records`           : 'No records this period' },
+  };
+  const opsDeltaMap: Record<string, ReturnType<typeof formatDelta>> = {
+    'Systems Shipped':         formatDelta(opsQty('Systems Shipped'),         prevOpsQty('Systems Shipped')),
+    'Installations Completed': formatDelta(opsQty('Installations Completed'), prevOpsQty('Installations Completed')),
+    'Spares Shipped':          formatDelta(opsQty('Spares Shipped'),           prevOpsQty('Spares Shipped')),
+  };
+
   // Derive live support metrics from SupportLog
   const filtered       = filterLogsByTimeFilter(supportLogs, timeFilter);
   const prevFiltered   = filterLogsByTimeFilter(supportLogs, getPreviousPeriod(timeFilter));
@@ -773,6 +933,7 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
     <>
       {selectedKpi          && <KPIDetailPanel kpi={selectedKpi} timeFilter={timeFilter} onClose={() => setSelectedKpi(null)} />}
       {selectedProcCategory && <ProcurementDrillDown category={selectedProcCategory} records={procRecords} onClose={() => setSelectedProcCategory(null)} />}
+      {selectedOpsCategory  && <OperationsDrillDown category={selectedOpsCategory} records={opsRecords} onClose={() => setSelectedOpsCategory(null)} />}
       {selectedMember       && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
 
       {/* ── Executive Summary ────────────────────────────────────────── */}
@@ -791,9 +952,10 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
           <div className={`dash-section-header ${accentCls}`}>{section.title}</div>
           <div className="grid three">
             {section.kpis.map(kpi => {
-              const clickable = Boolean(kpi.kpiRecordKey);
-              // Apply live procurement data override for Procurement Activity section
-              const override     = procKpiOverrides[kpi.label];
+              // Operations + Procurement cards are always clickable via their drill-down maps
+              const clickable = Boolean(kpi.kpiRecordKey) || Boolean(PROC_DRILL_MAP[kpi.label]) || Boolean(OPS_DRILL_MAP[kpi.label]);
+              // Live overrides: Operations quantity sums take priority, then Procurement
+              const override     = ({ ...opsKpiOverrides, ...procKpiOverrides })[kpi.label];
               const displayValue = override ? override.value : kpi.value;
               const displayNote  = override ? override.note  : kpi.note;
               return (
@@ -808,8 +970,8 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
                   <div className="kpi-label">{kpi.label}</div>
                   <div className="kpi-value">{displayValue}</div>
                   <div className="small">{displayNote}</div>
-                  {procDeltaMap[kpi.label] && (() => {
-                    const d = procDeltaMap[kpi.label];
+                  {({ ...procDeltaMap, ...opsDeltaMap })[kpi.label] && (() => {
+                    const d = ({ ...procDeltaMap, ...opsDeltaMap })[kpi.label];
                     return (
                       <div className={`card-delta ${d.isNeutral ? 'exec-delta-neutral' : d.isPositive ? 'exec-delta-up' : 'exec-delta-down'}`}>
                         {d.text}
@@ -1051,14 +1213,16 @@ function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
 
 // ─── Procurement Page (live data) ──────────────────────────────────────────
 
-function ProcurementPage({ timeFilter, activeTeamMembers }: {
+function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail }: {
   timeFilter: TimeFilter;
   activeTeamMembers: TeamMember[];
+  authUserEmail?: string;
 }) {
-  const [records,  setRecords]  = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
-  const [loading,  setLoading]  = useState(!DEMO_MODE);
-  const [selected, setSelected] = useState<ProcurementCategory | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const [records,   setRecords]   = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
+  const [loading,   setLoading]   = useState(!DEMO_MODE);
+  const [selected,  setSelected]  = useState<ProcurementCategory | null>(null);
+  const [showForm,  setShowForm]  = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saveErr,  setSaveErr]  = useState('');
 
   useEffect(() => {
@@ -1082,6 +1246,16 @@ function ProcurementPage({ timeFilter, activeTeamMembers }: {
       setShowForm(false);
     } catch (err) {
       setSaveErr(err instanceof Error ? err.message : 'Failed to save record.');
+    }
+  };
+
+  const handleEdit = async (id: string, patch: Partial<ProcurementRecord>) => {
+    try {
+      if (!DEMO_MODE) await updateProcurementInDB(id, patch);
+      setRecords(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+      setEditingId(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update record.');
     }
   };
 
@@ -1151,7 +1325,8 @@ function ProcurementPage({ timeFilter, activeTeamMembers }: {
             </thead>
             <tbody>
               {records.map(r => (
-                <tr key={r.id}>
+                <Fragment key={r.id}>
+                <tr>
                   <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
                   <td><span className="rec-id">{r.poNumber || '—'}</span></td>
                   <td><b>{r.supplier}</b>{r.notes && <div className="small">{r.notes}</div>}</td>
@@ -1160,12 +1335,27 @@ function ProcurementPage({ timeFilter, activeTeamMembers }: {
                   </td>
                   <td>{r.employeeName}</td>
                   <td>{r.date}</td>
+                  <td><span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : r.status === 'In Progress' ? 'status-in-progress' : 'status-blocked'}`}>{r.status}</span></td>
                   <td>
-                    <span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : r.status === 'In Progress' ? 'status-in-progress' : 'status-blocked'}`}>
-                      {r.status}
-                    </span>
+                    {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
+                      <button onClick={() => setEditingId(r.id)} style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Edit</button>
+                    )}
                   </td>
                 </tr>
+                {editingId === r.id && (
+                  <tr key={`edit-${r.id}`}>
+                    <td colSpan={8} style={{ padding: 0 }}>
+                      <div style={{ padding: '0 10px 10px' }}>
+                        <ProcurementEntryForm
+                          onSave={rec => handleEdit(r.id, rec)}
+                          onCancel={() => setEditingId(null)}
+                          activeTeamMembers={activeTeamMembers}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -1177,6 +1367,351 @@ function ProcurementPage({ timeFilter, activeTeamMembers }: {
           <div className="panel-empty">
             <div className="panel-empty-icon">📋</div>
             <div>No procurement records for this period. Use <b>+ Log Procurement</b> to add one.</div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ─── Edit Panels (own records) ────────────────────────────────────────────
+
+function SupportLogEditPanel({ log, onSave, onCancel }: {
+  log: SupportLog;
+  onSave: (patch: Partial<SupportLog>) => void;
+  onCancel: () => void;
+}) {
+  const [department, setDepartment] = useState(log.department);
+  const [category,   setCategory]   = useState(log.category);
+  const [title,      setTitle]      = useState(log.title);
+  const [hours,      setHours]      = useState(String(log.hours));
+  const [date,       setDate]       = useState(log.date);
+  const [notes,      setNotes]      = useState(log.notes);
+
+  const save = () => {
+    if (!title.trim() || !hours || parseFloat(hours) <= 0) {
+      alert('Title and a positive number of hours are required.');
+      return;
+    }
+    onSave({ department, category, title, hours: parseFloat(hours), date, week: getWeekTag(date), notes });
+  };
+
+  return (
+    <div className="card" style={{ border: '1px solid var(--color-accent)', marginBottom: 8 }}>
+      <h2 className="section-title" style={{ fontSize: 14 }}>Edit Activity</h2>
+      <div className="grid two">
+        <div>
+          <div className="kpi-label">Department</div>
+          <select className="input" value={department} onChange={e => setDepartment(e.target.value)}>
+            {['R&D','Product','Finance','Customer Success','Sales','Defence','Operations'].map(d => <option key={d}>{d}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="kpi-label">Category</div>
+          <select className="input" value={category} onChange={e => setCategory(e.target.value)}>
+            {ACTIVITY_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <div className="kpi-label">Title</div>
+          <input className="input" value={title} onChange={e => setTitle(e.target.value)} />
+        </div>
+        <div>
+          <div className="kpi-label">Hours</div>
+          <input className="input" type="number" min="0.5" step="0.5" value={hours} onChange={e => setHours(e.target.value)} />
+        </div>
+        <div>
+          <div className="kpi-label">Date</div>
+          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <div className="kpi-label">Notes</div>
+          <input className="input" value={notes} onChange={e => setNotes(e.target.value)} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+        <button className="save-button" style={{ marginTop: 0 }} onClick={save}>Save Changes</button>
+        <button onClick={onCancel} style={{ background: 'rgba(255,255,255,.07)', border: '1px solid var(--color-border)', color: '#e8eef7', borderRadius: 12, padding: '11px 20px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Operations Drill-Down Panel ──────────────────────────────────────────
+
+function OperationsDrillDown({ category, records, onClose }: {
+  category: OperationsCategory;
+  records: OperationsRecord[];
+  onClose: () => void;
+}) {
+  const filtered = records.filter(r => r.category === category);
+  const totalQty = filtered.reduce((s, r) => s + r.quantity, 0);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  return (
+    <>
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{category}</h3>
+            <div className="small" style={{ marginTop: 4 }}>
+              {filtered.length} record{filtered.length !== 1 ? 's' : ''}{totalQty > 0 ? ` · ${totalQty} total units` : ''}
+            </div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="panel-body">
+          {filtered.length === 0 ? (
+            <div className="panel-empty"><div className="panel-empty-icon">📋</div><div>No records for this period</div></div>
+          ) : (
+            <table className="record-table">
+              <thead>
+                <tr><th>Date</th><th>Employee</th><th>Quantity</th><th>Status</th><th>Notes</th></tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.id}>
+                    <td><span className="small">{r.date}</span></td>
+                    <td>{r.employeeName}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--color-completed)', whiteSpace: 'nowrap' }}>{r.quantity}</td>
+                    <td><span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : 'status-in-progress'}`}>{r.status}</span></td>
+                    <td><span className="rec-notes">{r.notes || '—'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Operations Entry Form ─────────────────────────────────────────────────
+
+function OperationsEntryForm({ onSave, onCancel, activeTeamMembers }: {
+  onSave: (r: OperationsRecord) => void;
+  onCancel: () => void;
+  activeTeamMembers: TeamMember[];
+}) {
+  const [employeeId, setEmployeeId] = useState('');
+  const [category,   setCategory]   = useState<OperationsCategory>(OPERATIONS_CATEGORIES[0]);
+  const [quantity,   setQuantity]   = useState('');
+  const [status,     setStatus]     = useState<OperationsStatus>('Completed');
+  const [notes,      setNotes]      = useState('');
+  const [date,       setDate]       = useState(new Date().toISOString().slice(0, 10));
+
+  const save = () => {
+    if (!employeeId) { alert('Please select an employee.'); return; }
+    const qty = Number(quantity);
+    if (!quantity.trim() || isNaN(qty) || qty <= 0) { alert('Quantity must be a positive number.'); return; }
+    const member = activeTeamMembers.find(m => m.id === employeeId);
+    if (!member) return;
+    onSave({
+      id:           `OPS-${Date.now()}`,
+      employeeId,
+      employeeName: member.name,
+      date,
+      category,
+      quantity:     qty,
+      notes:        notes.trim(),
+      status,
+    });
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 18 }}>
+      <h2 className="section-title">Log Operations Activity</h2>
+      <div className="grid two">
+        <div>
+          <div className="kpi-label">Employee *</div>
+          <select className="input" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+            <option value="">— Select employee —</option>
+            {activeTeamMembers.map(m => <option key={m.id} value={m.id}>{m.name} · {m.role}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="kpi-label">Category *</div>
+          <select className="input" value={category} onChange={e => setCategory(e.target.value as OperationsCategory)}>
+            {OPERATIONS_CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="kpi-label">Quantity *</div>
+          <input className="input" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} placeholder="e.g. 5" />
+        </div>
+        <div>
+          <div className="kpi-label">Status</div>
+          <select className="input" value={status} onChange={e => setStatus(e.target.value as OperationsStatus)}>
+            {OPERATIONS_STATUSES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <div className="kpi-label">Activity Date</div>
+          <input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+        </div>
+        <div>
+          <div className="kpi-label">Notes</div>
+          <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional context or outcome" />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+        <button className="save-button" style={{ marginTop: 0 }} onClick={save}>Save</button>
+        <button onClick={onCancel} style={{ background: 'rgba(255,255,255,.07)', border: '1px solid var(--color-border)', color: '#e8eef7', borderRadius: 12, padding: '11px 20px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Operations Page (live data) ───────────────────────────────────────────
+
+function OperationsPage({ timeFilter, activeTeamMembers, authUserEmail }: {
+  timeFilter: TimeFilter;
+  activeTeamMembers: TeamMember[];
+  authUserEmail?: string;
+}) {
+  const [records,   setRecords]   = useState<OperationsRecord[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [selected,  setSelected]  = useState<OperationsCategory | null>(null);
+  const [showForm,  setShowForm]  = useState(false);
+  const [saveErr,   setSaveErr]   = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const { start, end } = getDateRangeForFilter(timeFilter);
+    end.setHours(23, 59, 59, 999);
+    if (DEMO_MODE) {
+      setRecords(mockOperationsRecords.filter(r => {
+        const d = new Date(r.date + 'T00:00:00');
+        return d >= start && d <= end;
+      }));
+      setLoading(false);
+    } else {
+      setLoading(true);
+      fetchOperationsFromDB(timeFilter).then(data => { setRecords(data); setLoading(false); });
+    }
+  }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const qty = (cat: OperationsCategory) => records.filter(r => r.category === cat).reduce((s, r) => s + r.quantity, 0);
+
+  const handleSave = async (record: OperationsRecord) => {
+    setSaveErr('');
+    try {
+      if (!DEMO_MODE) await insertOperationsToDB(record);
+      setRecords(prev => [record, ...prev]);
+      setShowForm(false);
+    } catch (err) { setSaveErr(err instanceof Error ? err.message : 'Failed to save.'); }
+  };
+
+  const handleEdit = async (id: string, patch: Partial<OperationsRecord>) => {
+    try {
+      if (!DEMO_MODE) await updateOperationsInDB(id, patch);
+      setRecords(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+      setEditingId(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update record.');
+    }
+  };
+
+  return (
+    <>
+      {selected && <OperationsDrillDown category={selected} records={records} onClose={() => setSelected(null)} />}
+
+      <div className="page-header">
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <h2>Operations Activity</h2>
+            <div className="small">Systems shipped, installations and spares · {getTimeFilterLabel(timeFilter)}</div>
+          </div>
+          {!showForm && (
+            <button className="save-button" style={{ marginTop: 0, flexShrink: 0 }} onClick={() => setShowForm(true)}>
+              + Log Operations
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showForm && (
+        <OperationsEntryForm
+          onSave={handleSave}
+          onCancel={() => { setShowForm(false); setSaveErr(''); }}
+          activeTeamMembers={activeTeamMembers}
+        />
+      )}
+
+      {saveErr && (
+        <div style={{ fontSize: 13, color: 'var(--color-critical)', padding: '10px 14px', background: 'rgba(239,68,68,.08)', borderRadius: 10, marginBottom: 14 }}>
+          {saveErr}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="card"><div className="panel-empty"><div className="panel-empty-icon">⏳</div><div>Loading operations records…</div></div></div>
+      ) : (
+        <div className="grid three">
+          {OPERATIONS_CATEGORIES.map(cat => (
+            <div key={cat} className="card kpi-clickable" role="button" tabIndex={0}
+              onClick={() => setSelected(cat)} onKeyDown={e => e.key === 'Enter' && setSelected(cat)}>
+              <div className="kpi-label">{cat}</div>
+              <div className="kpi-value">{qty(cat)}</div>
+              <div className="small">{qty(cat) > 0 ? `${records.filter(r => r.category === cat).length} record${records.filter(r => r.category === cat).length !== 1 ? 's' : ''}` : 'No records this period'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && records.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2 className="section-title">All Records</h2>
+          <table className="table">
+            <thead><tr><th>Category</th><th>Qty</th><th>Employee</th><th>Date</th><th>Status</th><th>Notes</th><th></th></tr></thead>
+            <tbody>
+              {records.map(r => (
+                <Fragment key={r.id}>
+                  <tr>
+                    <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
+                    <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{r.quantity}</td>
+                    <td>{r.employeeName}</td>
+                    <td>{r.date}</td>
+                    <td><span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : 'status-in-progress'}`}>{r.status}</span></td>
+                    <td><span className="small">{r.notes || '—'}</span></td>
+                    <td>
+                      {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
+                        <button onClick={() => setEditingId(r.id)} style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Edit</button>
+                      )}
+                    </td>
+                  </tr>
+                  {editingId === r.id && (
+                    <tr key={`edit-${r.id}`}>
+                      <td colSpan={7} style={{ padding: 0 }}>
+                        <div style={{ padding: '0 10px 10px' }}>
+                          <OperationsEntryForm
+                            onSave={rec => handleEdit(r.id, rec)}
+                            onCancel={() => setEditingId(null)}
+                            activeTeamMembers={activeTeamMembers}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && records.length === 0 && (
+        <div className="card" style={{ marginTop: 8 }}>
+          <div className="panel-empty">
+            <div className="panel-empty-icon">📋</div>
+            <div>No operations records for this period. Use <b>+ Log Operations</b> to add one.</div>
           </div>
         </div>
       )}
@@ -1428,7 +1963,13 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
 
 // ─── Activity Feed (derived from SupportLog) ───────────────────────────────
 
-function ActivityFeed({ timeFilter, supportLogs }: { timeFilter: TimeFilter; supportLogs: SupportLog[] }) {
+function ActivityFeed({ timeFilter, supportLogs, authUserEmail, onUpdateLog }: {
+  timeFilter: TimeFilter;
+  supportLogs: SupportLog[];
+  authUserEmail?: string;
+  onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
   const logs = filterLogsByTimeFilter(supportLogs, timeFilter);
   return (
     <>
@@ -1443,14 +1984,35 @@ function ActivityFeed({ timeFilter, supportLogs }: { timeFilter: TimeFilter; sup
           {logs.map(l => (
             <div key={l.id} className="event">
               <div><span className="pill">{l.date}</span></div>
-              <div>
-                <span className="pill">{l.department}</span>
-                <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{l.title}</h3>
-                {l.notes && <div className="small">{l.notes}</div>}
-                <div className="event-meta">
-                  <span className="owner-tag">↳ {l.employeeName}</span>
-                  <span className="status-badge status-completed">{l.hours}h</span>
-                </div>
+              <div style={{ flex: 1 }}>
+                {editingId === l.id ? (
+                  <SupportLogEditPanel
+                    log={l}
+                    onSave={patch => {
+                      onUpdateLog?.(l.id, patch);
+                      setEditingId(null);
+                    }}
+                    onCancel={() => setEditingId(null)}
+                  />
+                ) : (
+                  <>
+                    <span className="pill">{l.department}</span>
+                    <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{l.title}</h3>
+                    {l.notes && <div className="small">{l.notes}</div>}
+                    <div className="event-meta">
+                      <span className="owner-tag">↳ {l.employeeName}</span>
+                      <span className="status-badge status-completed">{l.hours}h</span>
+                      {authUserEmail && l.employeeId === authUserEmail && (
+                        <button
+                          onClick={() => setEditingId(l.id)}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -1602,13 +2164,21 @@ export default function App() {
       supabase.auth.getUser().then(async ({ data: { user } }) => {
         if (user) {
           setAuthUser({ id: user.id, email: user.email ?? '' });
-          // Fetch logs and team members in parallel
-          const [logs, members] = await Promise.all([
-            fetchLogsFromDB(),
-            fetchTeamMembersFromDB(),
-          ]);
-          setDbLogs(logs);
-          if (members.length > 0) setDbTeamMembers(members);
+          try {
+            // Fetch logs and team members in parallel
+            const [logs, members] = await Promise.all([
+              fetchLogsFromDB(),
+              fetchTeamMembersFromDB(),
+            ]);
+            setDbLogs(logs);
+            if (members.length > 0) setDbTeamMembers(members);
+          } catch (fetchErr) {
+            // fetchLogsFromDB now throws on error — catch here so a failed
+            // fetch does not crash the bootstrap or leave dbLogs stale-empty.
+            console.error('Bootstrap fetch failed:', fetchErr);
+            // dbLogs stays as [] (initial state) — the dashboard shows empty states
+            // rather than crashing. The user can refresh to retry.
+          }
         }
         setDbLoading(false);
       });
@@ -1667,6 +2237,17 @@ export default function App() {
     }
   };
 
+  // ── Update support log (edit own record) ─────────────────────────────────
+  const updateLog = async (id: string, patch: Partial<SupportLog>) => {
+    try {
+      if (!DEMO_MODE) await updateSupportLogInDB(id, patch);
+      setDbLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+      setUserLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update activity.');
+    }
+  };
+
   // ── Sign out ──────────────────────────────────────────────────────────────
   const signOut = async () => {
     const supabase = createClient();
@@ -1690,10 +2271,11 @@ export default function App() {
   let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
-  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} />;
+  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} />;
+  if (page === 'Operations')                   content = <OperationsPage  timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
-  if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} supportLogs={supportLogs} />;
+  if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} supportLogs={supportLogs} authUserEmail={authUser?.email} onUpdateLog={updateLog} />;
   if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} />;
 
   return (

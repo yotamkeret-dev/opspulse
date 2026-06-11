@@ -17,27 +17,41 @@ export const MONTH_NAMES = [
   'July','August','September','October','November','December',
 ] as const;
 
-function isoWeekNum(date: Date): number {
-  const thu = new Date(date);
-  thu.setDate(date.getDate() + 4 - (date.getDay() || 7));
-  const yr  = new Date(thu.getFullYear(), 0, 1);
-  return Math.ceil(((thu.getTime() - yr.getTime()) / 86400000 + 1) / 7);
+// ─── Israeli business week: Sunday start, Saturday end ────────────────────
+// Year assignment uses the Thursday of the week (same principle as ISO).
+// Example: Israeli W24/2026 = Sun Jun 7 – Sat Jun 13, 2026.
+
+function israeliWeekOfDate(date: Date): { week: number; year: number } {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  // Thursday of this week (Sun=0 → Thu=4)
+  const thu = new Date(d);
+  thu.setDate(d.getDate() - d.getDay() + 4);
+  const year = thu.getFullYear();           // year the week belongs to
+  // Sunday of this week
+  const sun = new Date(d);
+  sun.setDate(d.getDate() - d.getDay());
+  // Sunday of the first week of `year`
+  const jan1    = new Date(year, 0, 1);
+  const jan1Sun = new Date(jan1);
+  jan1Sun.setDate(jan1.getDate() - jan1.getDay());
+  const week = Math.round((sun.getTime() - jan1Sun.getTime()) / (7 * 86400000)) + 1;
+  return { week, year };
 }
 
-function isoWeekRange(year: number, week: number): { start: Date; end: Date } {
-  const jan4   = new Date(year, 0, 4);
-  const dow    = jan4.getDay() || 7;
-  const mon    = new Date(jan4);
-  mon.setDate(jan4.getDate() - dow + 1);          // Monday of ISO week 1
-  const start  = new Date(mon);
-  start.setDate(mon.getDate() + (week - 1) * 7);  // Monday of target week
-  const end    = new Date(start);
-  end.setDate(start.getDate() + 6);               // Sunday of target week
+function israeliWeekRange(year: number, week: number): { start: Date; end: Date } {
+  const jan1    = new Date(year, 0, 1);
+  const jan1Sun = new Date(jan1);
+  jan1Sun.setDate(jan1.getDate() - jan1.getDay()); // Sunday of first week
+  const start   = new Date(jan1Sun);
+  start.setDate(jan1Sun.getDate() + (week - 1) * 7);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);                // Saturday
   return { start, end };
 }
 
 export function getDateRangeForFilter(tf: TimeFilter): { start: Date; end: Date } {
-  if (tf.periodType === 'week') return isoWeekRange(tf.selectedYear, tf.selectedWeek);
+  if (tf.periodType === 'week') return israeliWeekRange(tf.selectedYear, tf.selectedWeek);
   if (tf.periodType === 'month') return {
     start: new Date(tf.selectedYear, tf.selectedMonth - 1, 1),
     end:   new Date(tf.selectedYear, tf.selectedMonth,     0),
@@ -62,9 +76,10 @@ export function filterLogsByTimeFilter(logs: SupportLog[], tf: TimeFilter): Supp
 
 export function getTimeFilterLabel(tf: TimeFilter): string {
   if (tf.periodType === 'week') {
-    const { start, end } = isoWeekRange(tf.selectedYear, tf.selectedWeek);
+    const { start, end } = israeliWeekRange(tf.selectedYear, tf.selectedWeek);
     const fmt = (d: Date) => `${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
-    return `W${String(tf.selectedWeek).padStart(2, '0')} · ${fmt(start)}–${fmt(end)}, ${tf.selectedYear}`;
+    // Append (Sun–Sat) to make the Israeli week convention explicit
+    return `W${String(tf.selectedWeek).padStart(2, '0')} · ${fmt(start)} – ${fmt(end)}, ${tf.selectedYear}`;
   }
   if (tf.periodType === 'month') return `${MONTH_NAMES[tf.selectedMonth - 1]} ${tf.selectedYear}`;
   return `Q${tf.selectedQuarter} ${tf.selectedYear}`;
@@ -74,8 +89,12 @@ export function getTimeFilterLabel(tf: TimeFilter): string {
 export function getPreviousPeriod(tf: TimeFilter): TimeFilter {
   if (tf.periodType === 'week') {
     if (tf.selectedWeek > 1) return { ...tf, selectedWeek: tf.selectedWeek - 1 };
-    // W1 → previous year's last week (ISO years have either 52 or 53 weeks; 52 is safe default)
-    return { ...tf, selectedYear: tf.selectedYear - 1, selectedWeek: 52 };
+    // W1 → find the Saturday right before W1 starts (= last day of prev year's last week)
+    const w1Start  = israeliWeekRange(tf.selectedYear, 1).start;
+    const satBefore = new Date(w1Start);
+    satBefore.setDate(w1Start.getDate() - 1); // the Saturday before W1
+    const { week: lastWeek, year: prevYear } = israeliWeekOfDate(satBefore);
+    return { ...tf, selectedYear: prevYear, selectedWeek: lastWeek };
   }
   if (tf.periodType === 'month') {
     if (tf.selectedMonth > 1) return { ...tf, selectedMonth: tf.selectedMonth - 1 };
@@ -88,10 +107,11 @@ export function getPreviousPeriod(tf: TimeFilter): TimeFilter {
 
 export function currentTimeFilter(): TimeFilter {
   const now = new Date();
+  const { week, year } = israeliWeekOfDate(now);  // Israeli week (Sun–Sat)
   return {
     periodType:      'week',
-    selectedYear:    now.getFullYear(),
-    selectedWeek:    isoWeekNum(now),
+    selectedYear:    year,
+    selectedWeek:    week,
     selectedMonth:   now.getMonth() + 1,
     selectedQuarter: Math.ceil((now.getMonth() + 1) / 3),
   };
@@ -168,17 +188,17 @@ export type ProcurementRecord = {
 
 // Demo-mode seed records (current week W23, Jun 1–4 2026)
 export const mockProcurementRecords: ProcurementRecord[] = [
-  { id:'PR-001', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4571', supplier:'Elektra Components GmbH', amountUsd:12400, category:'PO Created',       status:'Completed',   notes:'Emergency R&D components — sourced under 24h',      date:'2026-06-04' },
-  { id:'PR-002', employeeId:'dan-cohen',     employeeName:'Dan Cohen',     poNumber:'PO-4572', supplier:'Pacific Parts Direct',    amountUsd: 8200, category:'PO Created',       status:'Completed',   notes:'BAZ spare parts replenishment',                     date:'2026-06-03' },
-  { id:'PR-003', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'PO-4573', supplier:'GlobalTech Supply',       amountUsd:34000, category:'PO Created',       status:'In Progress', notes:'System 120 assembly components — awaiting sign-off', date:'2026-06-03' },
-  { id:'PR-004', employeeId:'noa-shaked',    employeeName:'Noa Shaked',    poNumber:'PO-4574', supplier:'Meridian Electronics',    amountUsd:56000, category:'PO Created',       status:'Completed',   notes:'Defence project materials Q2',                      date:'2026-06-02' },
-  { id:'PR-005', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4575', supplier:'Core Components Ltd',     amountUsd: 9600, category:'PO Created',       status:'Completed',   notes:'Inventory replenishment — screens batch',            date:'2026-06-01' },
-  { id:'PR-006', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'',        supplier:'Elektra Components GmbH', amountUsd:84000, category:'Supplier Payment', status:'Completed',   notes:'Q2 framework settlement',                           date:'2026-06-04' },
-  { id:'PR-007', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'',        supplier:'Meridian Electronics',    amountUsd:56000, category:'Supplier Payment', status:'Completed',   notes:'Defence project invoice cleared',                   date:'2026-06-02' },
-  { id:'PR-008', employeeId:'dan-cohen',     employeeName:'Dan Cohen',     poNumber:'',        supplier:'Pacific Parts Direct',    amountUsd:12400, category:'Supplier Payment', status:'Completed',   notes:'Emergency parts — same-day payment released',       date:'2026-06-03' },
-  { id:'PR-009', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'PO-4571', supplier:'Elektra Components GmbH', amountUsd:12400, category:'Emergency Request',status:'Completed',   notes:'R&D sprint blocker — component sourced in 4h',     date:'2026-06-04' },
-  { id:'PR-010', employeeId:'noa-shaked',    employeeName:'Noa Shaked',    poNumber:'PO-4574', supplier:'Meridian Electronics',    amountUsd:56000, category:'Emergency Request',status:'Completed',   notes:'Defence shipment — last-minute approval obtained',  date:'2026-06-02' },
-  { id:'PR-011', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4577', supplier:'Precision Parts Co',     amountUsd: 7100, category:'Emergency Request',status:'In Progress', notes:'Product support materials — awaiting delivery',     date:'2026-06-01' },
+  { id:'PR-001', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4571', supplier:'Elektra Components GmbH', amountUsd:12400, category:'PO Created',       status:'Completed',   notes:'Emergency R&D components — sourced under 24h',      date:'2026-06-11' },
+  { id:'PR-002', employeeId:'dan-cohen',     employeeName:'Dan Cohen',     poNumber:'PO-4572', supplier:'Pacific Parts Direct',    amountUsd: 8200, category:'PO Created',       status:'Completed',   notes:'BAZ spare parts replenishment',                     date:'2026-06-10' },
+  { id:'PR-003', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'PO-4573', supplier:'GlobalTech Supply',       amountUsd:34000, category:'PO Created',       status:'In Progress', notes:'System 120 assembly components — awaiting sign-off', date:'2026-06-10' },
+  { id:'PR-004', employeeId:'noa-shaked',    employeeName:'Noa Shaked',    poNumber:'PO-4574', supplier:'Meridian Electronics',    amountUsd:56000, category:'PO Created',       status:'Completed',   notes:'Defence project materials Q2',                      date:'2026-06-09' },
+  { id:'PR-005', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4575', supplier:'Core Components Ltd',     amountUsd: 9600, category:'PO Created',       status:'Completed',   notes:'Inventory replenishment — screens batch',            date:'2026-06-08' },
+  { id:'PR-006', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'',        supplier:'Elektra Components GmbH', amountUsd:84000, category:'Supplier Payment', status:'Completed',   notes:'Q2 framework settlement',                           date:'2026-06-11' },
+  { id:'PR-007', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'',        supplier:'Meridian Electronics',    amountUsd:56000, category:'Supplier Payment', status:'Completed',   notes:'Defence project invoice cleared',                   date:'2026-06-09' },
+  { id:'PR-008', employeeId:'dan-cohen',     employeeName:'Dan Cohen',     poNumber:'',        supplier:'Pacific Parts Direct',    amountUsd:12400, category:'Supplier Payment', status:'Completed',   notes:'Emergency parts — same-day payment released',       date:'2026-06-10' },
+  { id:'PR-009', employeeId:'amit-levy',     employeeName:'Amit Levy',     poNumber:'PO-4571', supplier:'Elektra Components GmbH', amountUsd:12400, category:'Emergency Request',status:'Completed',   notes:'R&D sprint blocker — component sourced in 4h',     date:'2026-06-11' },
+  { id:'PR-010', employeeId:'noa-shaked',    employeeName:'Noa Shaked',    poNumber:'PO-4574', supplier:'Meridian Electronics',    amountUsd:56000, category:'Emergency Request',status:'Completed',   notes:'Defence shipment — last-minute approval obtained',  date:'2026-06-09' },
+  { id:'PR-011', employeeId:'yotam-keret',  employeeName:'Yotam Keret',  poNumber:'PO-4577', supplier:'Precision Parts Co',     amountUsd: 7100, category:'Emergency Request',status:'In Progress', notes:'Product support materials — awaiting delivery',     date:'2026-06-08' },
 ];
 
 export const timeRangeData = {
@@ -202,12 +222,12 @@ export const timeRangeData = {
       { name: 'CS', hours: 13 },
     ],
     logistics: [
-      { metric: 'Systems Shipped', value: '32', detail: 'Full systems, replacements and upgrades' },
-      { metric: 'Ready to Ship at BAZ', value: '14', detail: 'Packed and awaiting final release' },
-      { metric: 'Customs Clearance', value: '7', detail: 'Shipments currently in active clearance' },
-      { metric: 'Spare Parts Sent', value: '46', detail: 'Screens, switches, computers and service kits' },
-      { metric: 'Systems In Assembly', value: '11', detail: 'Currently being prepared at workshop' },
-      { metric: 'Pending Deliveries', value: '8', detail: 'Awaiting customer confirmation or slot' },
+      { metric: 'Systems Shipped',       value: '0', detail: 'No records this period' },
+      { metric: 'Ready to Ship at BAZ',  value: '0', detail: 'No records this period' },
+      { metric: 'Customs Clearance',     value: '0', detail: 'No records this period' },
+      { metric: 'Spare Parts Sent',      value: '0', detail: 'No records this period' },
+      { metric: 'Systems In Assembly',   value: '0', detail: 'No records this period' },
+      { metric: 'Pending Deliveries',    value: '0', detail: 'No records this period' },
     ],
     procurement: [
       { metric: 'PO Created', value: '74', detail: 'Oracle purchase orders created this week' },
@@ -750,21 +770,21 @@ export function filterLogsByPeriod(logs: SupportLog[], period: Period): SupportL
 // Seed data — W22 sums to 126 h matching previous mock KPI values
 export const seedSupportLogs: SupportLog[] = [
   // === W22 → mapped to current week Jun 1–4, 2026 ===
-  { id:'LOG-2201', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'Procurement',     title:'Emergency R&D component sourcing',        hours:14, date:'2026-06-04', week:'W22', notes:'Sourced 4 components under 24h for R&D sprint' },
-  { id:'LOG-2202', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Finance',         category:'Finance Support', title:'Supplier payment batch sign-off',          hours:10, date:'2026-06-03', week:'W22', notes:'$284K payment batch coordinated with Finance' },
-  { id:'LOG-2203', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Defence',         category:'Logistics',       title:'Defence shipment preparation',             hours: 8, date:'2026-06-03', week:'W22', notes:'Urgent Defence shipment coordinated end-to-end' },
-  { id:'LOG-2204', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'R&D',             category:'R&D Support',     title:'R&D prototype testing coordination',       hours:12, date:'2026-06-04', week:'W22', notes:'Test equipment procurement and setup for R&D' },
-  { id:'LOG-2205', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Defence project procurement batch',         hours: 8, date:'2026-06-02', week:'W22', notes:'4 POs raised and approved same day' },
-  { id:'LOG-2206', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Customer Success', category:'CS Support',      title:'Customer delivery documentation',           hours: 8, date:'2026-06-04', week:'W22', notes:'Delivery docs coordinated for 3 customers' },
-  { id:'LOG-2207', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Product roadmap materials preparation',     hours:14, date:'2026-06-03', week:'W22', notes:'3 kits prepared for internal product showcase' },
-  { id:'LOG-2208', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'R&D',             category:'R&D Support',     title:'R&D lab component delivery',               hours: 8, date:'2026-06-01', week:'W22', notes:'8 components sourced and delivered to R&D lab' },
-  { id:'LOG-2209', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Finance',         category:'Finance Support', title:'Finance invoice reconciliation support',    hours: 6, date:'2026-06-04', week:'W22', notes:'Invoice review for Q2 framework agreement' },
-  { id:'LOG-2210', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Defence',         category:'Logistics',       title:'Defence logistics coordination',            hours: 9, date:'2026-06-02', week:'W22', notes:'End-to-end logistics for urgent Defence delivery' },
-  { id:'LOG-2211', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Customer Success', category:'CS Support',      title:'Customer handover support',                 hours: 5, date:'2026-06-04', week:'W22', notes:'3 customer handovers coordinated' },
-  { id:'LOG-2212', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Product',         category:'Product Support', title:'Product operational enablement',            hours: 8, date:'2026-06-03', week:'W22', notes:'Spec reviews and prototype materials' },
-  { id:'LOG-2213', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'R&D',             category:'R&D Support',     title:'R&D emergency parts delivery',              hours: 8, date:'2026-06-04', week:'W22', notes:'Urgent component delivery for R&D sprint' },
-  { id:'LOG-2214', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'Product',         category:'Product Support', title:'Product operations support',                hours: 6, date:'2026-06-04', week:'W22', notes:'Operational support for Product team deliverable' },
-  { id:'LOG-2215', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'Finance',         category:'Finance Support', title:'Finance payment tracking',                  hours: 2, date:'2026-06-03', week:'W22', notes:'Payment status monitoring and reporting' },
+  { id:'LOG-2201', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'Procurement',     title:'Emergency R&D component sourcing',        hours:14, date:'2026-06-11', week:'W24', notes:'Sourced 4 components under 24h for R&D sprint' },
+  { id:'LOG-2202', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Finance',         category:'Finance Support', title:'Supplier payment batch sign-off',          hours:10, date:'2026-06-10', week:'W24', notes:'$284K payment batch coordinated with Finance' },
+  { id:'LOG-2203', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Defence',         category:'Logistics',       title:'Defence shipment preparation',             hours: 8, date:'2026-06-10', week:'W24', notes:'Urgent Defence shipment coordinated end-to-end' },
+  { id:'LOG-2204', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'R&D',             category:'R&D Support',     title:'R&D prototype testing coordination',       hours:12, date:'2026-06-11', week:'W24', notes:'Test equipment procurement and setup for R&D' },
+  { id:'LOG-2205', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Defence project procurement batch',         hours: 8, date:'2026-06-09', week:'W24', notes:'4 POs raised and approved same day' },
+  { id:'LOG-2206', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Customer Success', category:'CS Support',      title:'Customer delivery documentation',           hours: 8, date:'2026-06-11', week:'W24', notes:'Delivery docs coordinated for 3 customers' },
+  { id:'LOG-2207', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Product roadmap materials preparation',     hours:14, date:'2026-06-10', week:'W24', notes:'3 kits prepared for internal product showcase' },
+  { id:'LOG-2208', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'R&D',             category:'R&D Support',     title:'R&D lab component delivery',               hours: 8, date:'2026-06-08', week:'W24', notes:'8 components sourced and delivered to R&D lab' },
+  { id:'LOG-2209', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Finance',         category:'Finance Support', title:'Finance invoice reconciliation support',    hours: 6, date:'2026-06-11', week:'W24', notes:'Invoice review for Q2 framework agreement' },
+  { id:'LOG-2210', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Defence',         category:'Logistics',       title:'Defence logistics coordination',            hours: 9, date:'2026-06-09', week:'W24', notes:'End-to-end logistics for urgent Defence delivery' },
+  { id:'LOG-2211', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Customer Success', category:'CS Support',      title:'Customer handover support',                 hours: 5, date:'2026-06-11', week:'W24', notes:'3 customer handovers coordinated' },
+  { id:'LOG-2212', employeeId:'noa-shaked',      employeeName:'Noa Shaked',      department:'Product',         category:'Product Support', title:'Product operational enablement',            hours: 8, date:'2026-06-10', week:'W24', notes:'Spec reviews and prototype materials' },
+  { id:'LOG-2213', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'R&D',             category:'R&D Support',     title:'R&D emergency parts delivery',              hours: 8, date:'2026-06-11', week:'W24', notes:'Urgent component delivery for R&D sprint' },
+  { id:'LOG-2214', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'Product',         category:'Product Support', title:'Product operations support',                hours: 6, date:'2026-06-11', week:'W24', notes:'Operational support for Product team deliverable' },
+  { id:'LOG-2215', employeeId:'eliav-mizrahi',   employeeName:'Eliav Mizrahi',   department:'Finance',         category:'Finance Support', title:'Finance payment tracking',                  hours: 2, date:'2026-06-10', week:'W24', notes:'Payment status monitoring and reporting' },
   // === W21 (May 19 – 25) ===
   { id:'LOG-2121', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'R&D Support',     title:'R&D sprint component support',             hours:16, date:'2026-05-22', week:'W21', notes:'' },
   { id:'LOG-2122', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'Finance',         category:'Finance Support', title:'Weekly supplier payment run',              hours: 8, date:'2026-05-21', week:'W21', notes:'' },
@@ -807,6 +827,40 @@ export const seedSupportLogs: SupportLog[] = [
   { id:'LOG-1321', employeeId:'yotam-keret',    employeeName:'Yotam Keret',    department:'R&D',             category:'R&D Support',     title:'Q2 R&D preparation support',               hours:18, date:'2026-04-01', week:'W13', notes:'' },
   { id:'LOG-1322', employeeId:'dan-cohen',       employeeName:'Dan Cohen',       department:'Defence',         category:'Procurement',     title:'Q2 Defence prep procurement',              hours:14, date:'2026-04-01', week:'W13', notes:'' },
   { id:'LOG-1323', employeeId:'amit-levy',       employeeName:'Amit Levy',       department:'Product',         category:'Product Support', title:'Q2 Product support',                       hours:14, date:'2026-04-01', week:'W13', notes:'' },
+];
+
+// ─── Operations Record (Supabase table: operations_records) ──────────────
+export const OPERATIONS_CATEGORIES = [
+  'Systems Shipped',
+  'Installations Completed',
+  'Spares Shipped',
+] as const;
+export type OperationsCategory = typeof OPERATIONS_CATEGORIES[number];
+
+export const OPERATIONS_STATUSES = ['Open', 'Completed'] as const;
+export type OperationsStatus = typeof OPERATIONS_STATUSES[number];
+
+export type OperationsRecord = {
+  id:           string;
+  employeeId:   string;           // → employee_id
+  employeeName: string;           // → employee_name
+  date:         string;           // YYYY-MM-DD → activity_date
+  category:     OperationsCategory;
+  quantity:     number;           // → quantity (units)
+  notes:        string;
+  status:       OperationsStatus;
+};
+
+// Demo-mode seed records (current week W23, Jun 1–4 2026)
+export const mockOperationsRecords: OperationsRecord[] = [
+  { id:'OPS-001', employeeId:'yotam-keret',   employeeName:'Yotam Keret',   date:'2026-06-04', category:'Systems Shipped',         quantity: 8, status:'Completed', notes:'Batch shipment to Frontier Defense and Centuria' },
+  { id:'OPS-002', employeeId:'dan-cohen',      employeeName:'Dan Cohen',      date:'2026-06-03', category:'Systems Shipped',         quantity: 5, status:'Completed', notes:'Urgent shipment — Zenith Command' },
+  { id:'OPS-003', employeeId:'yotam-keret',   employeeName:'Yotam Keret',   date:'2026-06-01', category:'Systems Shipped',         quantity: 6, status:'Completed', notes:'Standard batch delivery — Q2' },
+  { id:'OPS-004', employeeId:'noa-shaked',     employeeName:'Noa Shaked',     date:'2026-06-02', category:'Installations Completed', quantity: 3, status:'Completed', notes:'MSC site installation completed end-to-end' },
+  { id:'OPS-005', employeeId:'eliav-mizrahi',  employeeName:'Eliav Mizrahi',  date:'2026-06-02', category:'Installations Completed', quantity: 2, status:'Completed', notes:'Horizon Defense site upgrade' },
+  { id:'OPS-006', employeeId:'noa-shaked',     employeeName:'Noa Shaked',     date:'2026-06-04', category:'Installations Completed', quantity: 1, status:'Open',      notes:'Zenith Site C — in progress' },
+  { id:'OPS-007', employeeId:'amit-levy',      employeeName:'Amit Levy',      date:'2026-06-03', category:'Spares Shipped',          quantity:12, status:'Completed', notes:'Spare parts kits for CS customers' },
+  { id:'OPS-008', employeeId:'dan-cohen',      employeeName:'Dan Cohen',      date:'2026-06-01', category:'Spares Shipped',          quantity: 9, status:'Completed', notes:'Switch and screen kits batch' },
 ];
 
 // Predefined activity categories — single source of truth for both the form and future analytics
