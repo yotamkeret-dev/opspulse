@@ -191,6 +191,9 @@ a { color: inherit; text-decoration: none; }
 .contrib-depts { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
 .contrib-last { color: var(--color-muted); font-size: 12px; margin-top: 4px; }
 
+/* ── Orca AI logo (place file at public/orca-logo.png) ──── */
+.orca-logo-img { width: 140px; height: 40px; object-fit: contain; object-position: left center; display: block; margin-bottom: 12px; }
+
 /* ── Orca brand block in sidebar ─────────────────────────── */
 .brand-block { display: flex; align-items: baseline; gap: 6px; }
 .brand-orca  { font-size: 15px; font-weight: 900; letter-spacing: .08em; color: var(--color-accent); }
@@ -224,6 +227,7 @@ a { color: inherit; text-decoration: none; }
 .exec-summary { padding: 0; overflow: hidden; }
 .exec-summary-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; color: var(--color-muted); padding: 14px 18px 10px; border-bottom: 1px solid var(--color-border); }
 .exec-summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); }
+.grid.hl-metrics   { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .exec-summary-item { padding: 14px 16px; border-right: 1px solid var(--color-border); }
 .exec-summary-item:last-child { border-right: none; }
 .exec-summary-label { font-size: 11px; font-weight: 700; color: var(--color-muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
@@ -243,6 +247,7 @@ a { color: inherit; text-decoration: none; }
   .kpis, .two, .three { grid-template-columns: 1fr; }
   .topbar { flex-wrap: wrap; }
   .exec-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .grid.hl-metrics   { grid-template-columns: repeat(2, 1fr); }
   .exec-summary-item:nth-child(2n) { border-right: none; }
   .main::after { font-size: 80px; }
 }

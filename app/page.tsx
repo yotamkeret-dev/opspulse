@@ -259,6 +259,13 @@ function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSig
   return (
     <div className="shell">
       <aside className="sidebar">
+        {/* Orca AI logo — SVG at public/orca-logo.svg; swap src to orca-logo.png for official file */}
+        <img
+          src="/orca-logo.svg"
+          alt="Orca AI"
+          className="orca-logo-img"
+          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        />
         <div className="brand-block">
           <span className="brand-orca">ORCA</span>
           <span className="brand-sep">·</span>
@@ -822,26 +829,39 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
         <div className="card">
           <h2 className="section-title">Team Last Updates</h2>
           <div className="team-pulse-list">
-            {activeTeamMembers.map(m => {
-              const memberLogs = filtered.filter(l => l.employeeName === m.name);
-              const hours = memberLogs.reduce((s, l) => s + l.hours, 0);
-              const depts = [...new Set(memberLogs.map(l => l.department))];
-              const lines: string[] = [];
-              if (hours > 0) lines.push(`${hours}h delivered`);
-              if (depts.length > 0) lines.push(depts.slice(0, 2).join(' · '));
-              return (
-                <div key={m.name} className="team-pulse-item">
-                  <span className="pulse-check">✓</span>
-                  <div className="pulse-info">
-                    <div className="pulse-name">{m.name}</div>
-                    {lines.length > 0 && <div className="pulse-summary">{lines.join(' · ')}</div>}
-                  </div>
-                  <button className="last-updates-btn" onClick={() => openMember(m.name)}>
-                    Last Updates ↗
-                  </button>
-                </div>
+            {(() => {
+              const active = activeTeamMembers.filter(m =>
+                filtered.some(l => l.employeeName === m.name)
               );
-            })}
+              if (active.length === 0) {
+                return (
+                  <div className="panel-empty" style={{ padding: '20px 0 8px' }}>
+                    <div className="panel-empty-icon">👤</div>
+                    <div>No team updates submitted this period</div>
+                  </div>
+                );
+              }
+              return active.map(m => {
+                const memberLogs = filtered.filter(l => l.employeeName === m.name);
+                const hours = memberLogs.reduce((s, l) => s + l.hours, 0);
+                const depts = [...new Set(memberLogs.map(l => l.department))];
+                const lines: string[] = [];
+                if (hours > 0) lines.push(`${hours}h delivered`);
+                if (depts.length > 0) lines.push(depts.slice(0, 2).join(' · '));
+                return (
+                  <div key={m.name} className="team-pulse-item">
+                    <span className="pulse-check">✓</span>
+                    <div className="pulse-info">
+                      <div className="pulse-name">{m.name}</div>
+                      {lines.length > 0 && <div className="pulse-summary">{lines.join(' · ')}</div>}
+                    </div>
+                    <button className="last-updates-btn" onClick={() => openMember(m.name)}>
+                      Last Updates ↗
+                    </button>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </div>
 
@@ -1237,23 +1257,171 @@ function Support({ timeFilter, supportLogs }: { timeFilter: TimeFilter; supportL
 
 // ─── Highlights ────────────────────────────────────────────────────────────
 
-function Highlights({ timeFilter }: { timeFilter: TimeFilter }) {
-  const data = timeRangeData[timeFilterToPeriod(timeFilter)];
+function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
+  timeFilter: TimeFilter;
+  supportLogs: SupportLog[];
+  activeTeamMembers: TeamMember[];
+}) {
+  const [procRecords,     setProcRecords]     = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
+  const [prevProcRecords, setPrevProcRecords] = useState<ProcurementRecord[]>([]);
+
+  useEffect(() => {
+    const prev = getPreviousPeriod(timeFilter);
+    const filterMock = (tf: typeof timeFilter) => {
+      const { start, end } = getDateRangeForFilter(tf);
+      end.setHours(23, 59, 59, 999);
+      return mockProcurementRecords.filter(r => {
+        const d = new Date(r.date + 'T00:00:00');
+        return d >= start && d <= end;
+      });
+    };
+    if (DEMO_MODE) { setProcRecords(filterMock(timeFilter)); setPrevProcRecords(filterMock(prev)); }
+    else { fetchProcurementFromDB(timeFilter).then(setProcRecords); fetchProcurementFromDB(prev).then(setPrevProcRecords); }
+  }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered     = filterLogsByTimeFilter(supportLogs, timeFilter);
+  const prevFiltered = filterLogsByTimeFilter(supportLogs, getPreviousPeriod(timeFilter));
+
+  const c = {
+    activities: filtered.length,
+    hours:      filtered.reduce((s, l) => s + l.hours, 0),
+    po:         procRecords.filter(r => r.category === 'PO Created').length,
+    emergency:  procRecords.filter(r => r.category === 'Emergency Request').length,
+    payments:   procRecords.filter(r => r.category === 'Supplier Payment').length,
+  };
+  const p = {
+    activities: prevFiltered.length,
+    hours:      prevFiltered.reduce((s, l) => s + l.hours, 0),
+    po:         prevProcRecords.filter(r => r.category === 'PO Created').length,
+    emergency:  prevProcRecords.filter(r => r.category === 'Emergency Request').length,
+    payments:   prevProcRecords.filter(r => r.category === 'Supplier Payment').length,
+  };
+
+  const byDept = buildSupportByDept(filtered);
+  const contributors = activeTeamMembers.map(m => ({
+    name: m.name, role: m.role,
+    hours:      filtered.filter(l => l.employeeName === m.name).reduce((s, l) => s + l.hours, 0),
+    activities: filtered.filter(l => l.employeeName === m.name).length,
+  })).filter(x => x.activities > 0).sort((a, b) => b.hours - a.hours);
+
+  const hasData = c.activities > 0 || c.po > 0 || c.emergency > 0 || c.payments > 0;
+
+  const exportReport = () => {
+    const period = getTimeFilterLabel(timeFilter);
+    const pad = (s: string, n: number) => s.padEnd(n);
+    let t = `OPSPULSE OPERATIONS SUMMARY\n${'='.repeat(44)}\n`;
+    t += `Period:    ${period}\n`;
+    t += `Generated: ${new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}\n\n`;
+    t += `ACTIVITY\n`;
+    t += `${pad('Activities Completed:', 26)}${c.activities}\n`;
+    t += `${pad('Support Hours:', 26)}${c.hours}h\n\n`;
+    t += `PROCUREMENT\n`;
+    t += `${pad('PO Created:', 26)}${c.po}\n`;
+    t += `${pad('Emergency Requests:', 26)}${c.emergency}\n`;
+    t += `${pad('Supplier Payments:', 26)}${c.payments}\n`;
+    if (byDept.length > 0) {
+      t += `\nSUPPORT BY DEPARTMENT\n`;
+      byDept.forEach(d => { t += `${pad(d.name, 24)}${d.hours}h\n`; });
+    }
+    if (contributors.length > 0) {
+      t += `\nTOP CONTRIBUTORS\n`;
+      contributors.forEach(x => { t += `${pad(x.name, 24)}${x.hours}h · ${x.activities} activities\n`; });
+    }
+    const slug = period.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const blob = new Blob([t], { type: 'text/plain;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement('a'), { href: url, download: `opspulse-${slug}.txt` });
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const metrics = [
+    { label: 'Activities Completed', cur: c.activities, prev: p.activities, fmt: String },
+    { label: 'Support Hours',        cur: c.hours,      prev: p.hours,      fmt: (n: number) => `${n}h` },
+    { label: 'PO Created',           cur: c.po,         prev: p.po,         fmt: String },
+    { label: 'Emergency Requests',   cur: c.emergency,  prev: p.emergency,  fmt: String },
+    { label: 'Supplier Payments',    cur: c.payments,   prev: p.payments,   fmt: String },
+  ];
+
   return (
     <>
       <div className="page-header">
-        <h2>Operational Highlights</h2>
-        <div className="small">Key achievements and delivery milestones · {getTimeFilterLabel(timeFilter)}</div>
-      </div>
-      <div className="card highlight">
-        {data.highlights.map(h => (
-          <div className="highlight-item" key={h.title}>
-            <span className="pill">{h.tag}</span>
-            <b>{h.title}</b>
-            <div className="small">{h.text}</div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <h2>Operational Highlights</h2>
+            <div className="small">Auto-generated executive summary · {getTimeFilterLabel(timeFilter)}</div>
           </div>
-        ))}
+          {hasData && (
+            <button className="save-button" style={{ marginTop: 0, flexShrink: 0 }} onClick={exportReport}>
+              Export Summary ↓
+            </button>
+          )}
+        </div>
       </div>
+
+      {!hasData ? (
+        <div className="card">
+          <div className="panel-empty">
+            <div className="panel-empty-icon">📊</div>
+            <div>No activity data for this period.</div>
+            <div className="small" style={{ marginTop: 6 }}>
+              Log activities via <b>Add Weekly Activity</b> or <b>Procurement</b>.
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="grid hl-metrics" style={{ marginBottom: 16 }}>
+            {metrics.map(m => {
+              const d = formatDelta(m.cur, m.prev);
+              const dcls = d.isNeutral ? 'exec-delta-neutral' : d.isPositive ? 'exec-delta-up' : 'exec-delta-down';
+              return (
+                <div key={m.label} className="card">
+                  <div className="kpi-label">{m.label}</div>
+                  <div className="kpi-value" style={{ fontSize: 28 }}>{m.fmt(m.cur)}</div>
+                  <div className={`card-delta ${dcls}`}>{d.text}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {byDept.length > 0 && (
+            <div className="card" style={{ marginBottom: 14 }}>
+              <h2 className="section-title">Support by Department</h2>
+              <table className="table">
+                <thead><tr><th>Department</th><th>Hours</th><th>Activities</th></tr></thead>
+                <tbody>
+                  {byDept.map(({ name, hours }) => (
+                    <tr key={name}>
+                      <td><b>{name}</b></td>
+                      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{hours}h</td>
+                      <td>{filtered.filter(l => l.department === name).length}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {contributors.length > 0 && (
+            <div className="card">
+              <h2 className="section-title">Top Contributors</h2>
+              <table className="table">
+                <thead><tr><th>Employee</th><th>Hours</th><th>Activities</th></tr></thead>
+                <tbody>
+                  {contributors.map(x => (
+                    <tr key={x.name}>
+                      <td><b>{x.name}</b><div className="small">{x.role}</div></td>
+                      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{x.hours}h</td>
+                      <td>{x.activities}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </>
   );
 }
@@ -1524,7 +1692,7 @@ export default function App() {
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
   if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
-  if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} />;
+  if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} />;
 

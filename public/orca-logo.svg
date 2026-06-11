@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 52" role="img" aria-label="Orca AI">
+  <!-- Whale tail fluke mark — dark navy #1B3461 -->
+  <!-- Left lobe: sweeps up-left from center notch -->
+  <path d="M24 40 C20 34 10 28 6 18 C2 10 6 2 14 4 C18 5 22 10 24 16 Z" fill="#1B3461"/>
+  <!-- Right lobe: sweeps up-right from center notch -->
+  <path d="M24 40 C28 34 38 28 42 18 C46 10 42 2 34 4 C30 5 26 10 24 16 Z" fill="#1B3461"/>
+  <!-- Center notch detail (V between lobes) -->
+  <path d="M24 40 C22 35 22 30 24 26 C26 30 26 35 24 40 Z" fill="#1B3461"/>
+
+  <!-- ORCA AI wordmark -->
+  <text
+    x="58" y="34"
+    fill="#1B3461"
+    font-family="'Arial Black','Helvetica Neue',Arial,sans-serif"
+    font-size="24"
+    font-weight="900"
+    letter-spacing="0.5"
+  >ORCA AI</text>
+</svg>
