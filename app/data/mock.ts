@@ -99,17 +99,17 @@ export const dashboardSections: DashboardSection[] = [
   {
     title: 'Production',
     kpis: [
-      { label: 'Ready to Ship at BAZ',    value: '14', note: 'Packed and awaiting final release'       },
-      { label: 'Systems Waiting for ATP', value:  '6', note: 'Pending approval to proceed'            },
-      { label: 'Systems After ATP',       value:  '9', note: 'ATP approved, in preparation'           },
+      { label: 'Ready to Ship at BAZ',    value: '0', note: 'No records this period' },
+      { label: 'Systems Waiting for ATP', value: '0', note: 'No records this period' },
+      { label: 'Systems After ATP',       value: '0', note: 'No records this period' },
     ],
   },
   {
     title: 'Operations',
     kpis: [
-      { label: 'Systems Shipped',         value: '32', note: 'Full systems, replacements and upgrades', kpiRecordKey: 'Systems Shipped'          },
-      { label: 'Installations Completed', value: '11', note: 'Salesforce source',                        kpiRecordKey: 'Installations Completed'  },
-      { label: 'Spares Shipped',          value: '46', note: 'Screens, switches, computers and kits',    kpiRecordKey: 'Spare Parts Sent'         },
+      { label: 'Systems Shipped',         value: '0', note: 'No records this period' },
+      { label: 'Installations Completed', value: '0', note: 'No records this period' },
+      { label: 'Spares Shipped',          value: '0', note: 'No records this period' },
     ],
   },
   {
