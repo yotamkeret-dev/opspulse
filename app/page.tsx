@@ -259,9 +259,9 @@ function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSig
   return (
     <div className="shell">
       <aside className="sidebar">
-        {/* Orca AI logo — SVG at public/orca-logo.svg; swap src to orca-logo.png for official file */}
+        {/* Orca AI logo — public/orca-logo.png */}
         <img
-          src="/orca-logo.svg"
+          src="/orca-logo.png"
           alt="Orca AI"
           className="orca-logo-img"
           onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
