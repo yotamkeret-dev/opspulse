@@ -240,6 +240,30 @@ a { color: inherit; text-decoration: none; }
 .exec-delta-neutral { color: rgba(143,163,187,.5); }
 .card-delta { font-size: 11px; font-weight: 700; margin-top: 4px; }
 
+/* ── Import Engine UI ────────────────────────────────────── */
+.import-dropzone {
+  border: 2px dashed var(--color-border);
+  border-radius: 16px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.import-dropzone:hover,
+.import-dropzone-active {
+  border-color: var(--color-accent);
+  background: rgba(91,141,238,.06);
+}
+.import-error {
+  font-size: 13px;
+  color: var(--color-critical);
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(239,68,68,.08);
+  border-radius: 10px;
+}
+.pill-amber { background: rgba(245,158,11,.14); color: var(--color-warning); border: 1px solid rgba(245,158,11,.28); }
+
 /* Mobile */
 @media (max-width: 980px) {
   .shell { display: block; }

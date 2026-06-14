@@ -3,6 +3,12 @@ import { Fragment, useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
 import {
+  parseFile, getHeaders, detectColumnMappings, columnMatchesToMap,
+  mapOraclePORow, ORACLE_PO_RULES,
+  fetchTemplates, saveTemplate, deleteTemplate, ORACLE_PO_DEFAULT_TEMPLATE,
+  type RawRow, type MappedRecord, type ColumnMatch, type MappingTemplate,
+} from '@/lib/import-engine';
+import {
   ACTIVITY_CATEGORIES, DashboardKpi, KPIRecord, MONTH_NAMES, Period, PeriodType,
   OperationsCategory, OperationsRecord, OPERATIONS_CATEGORIES, OPERATIONS_STATUSES, mockOperationsRecords,
   OperationsStatus,
@@ -1213,17 +1219,397 @@ function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
 
 // ─── Procurement Page (live data) ──────────────────────────────────────────
 
-function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail }: {
-  timeFilter: TimeFilter;
+// ─── Procurement Import Panel ──────────────────────────────────────────────
+
+type ImportStep = 'idle' | 'parsing' | 'mapping' | 'preview' | 'importing' | 'done';
+
+function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUserEmail }: {
+  onImport: (records: MappedRecord<ProcurementRecord>[]) => Promise<void>;
+  onClose:  () => void;
   activeTeamMembers: TeamMember[];
   authUserEmail?: string;
 }) {
-  const [records,   setRecords]   = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
-  const [loading,   setLoading]   = useState(!DEMO_MODE);
-  const [selected,  setSelected]  = useState<ProcurementCategory | null>(null);
-  const [showForm,  setShowForm]  = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [saveErr,  setSaveErr]  = useState('');
+  const [step,        setStep]        = useState<ImportStep>('idle');
+  const [rawRows,     setRawRows]     = useState<RawRow[]>([]);
+  const [sheets,      setSheets]      = useState<string[]>([]);
+  const [sourceType,  setSourceType]  = useState<'pdf' | 'excel' | 'csv'>('csv');
+  const [columnMap,   setColumnMap]   = useState<Record<string, string | null>>({});
+  const [colMatches,  setColMatches]  = useState<ColumnMatch[]>([]);
+  const [preview,     setPreview]     = useState<MappedRecord<ProcurementRecord>[]>([]);
+  const [templates,   setTemplates]   = useState<MappingTemplate[]>([]);
+  const [saveTplName, setSaveTplName] = useState('');
+  const [importResult,setImportResult]= useState<{ success: number; skipped: number } | null>(null);
+  const [error,       setError]       = useState<string | null>(null);
+  const [dragOver,    setDragOver]    = useState(false);
+
+  // Load templates on mount
+  useEffect(() => {
+    if (DEMO_MODE) return;
+    const supabase = createClient();
+    fetchTemplates(supabase).then(setTemplates).catch(() => {/* non-critical */});
+  }, []);
+
+  // Rebuild preview whenever column map or raw rows change
+  useEffect(() => {
+    if (rawRows.length === 0) return;
+    const meta = {
+      sourceFile:    '',
+      sourceType,
+      importedAt:    new Date().toISOString(),
+      importVersion: '1.0' as const,
+      extractedRows: rawRows,
+    };
+    const mapped = rawRows.map((row, i) =>
+      mapOraclePORow(row, columnMap, activeTeamMembers, meta, i)
+    );
+    setPreview(mapped);
+  }, [columnMap, rawRows, sourceType, activeTeamMembers]);
+
+  async function handleFile(file: File) {
+    setError(null);
+    setStep('parsing');
+    try {
+      const parsed = await parseFile(file);
+      setRawRows(parsed.rows);
+      setSheets(parsed.sheets ?? []);
+      setSourceType(parsed.sourceType);
+
+      // Auto-detect column mappings
+      const headers = getHeaders(parsed.rows);
+      const matches = detectColumnMappings(headers, ORACLE_PO_RULES);
+      setColMatches(matches);
+      setColumnMap(columnMatchesToMap(matches));
+
+      setStep(parsed.sourceType === 'pdf' ? 'preview' : 'mapping');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to parse file');
+      setStep('idle');
+    }
+  }
+
+  function applyTemplate(tpl: MappingTemplate) {
+    const map: Record<string, string | null> = { ...columnMap };
+    for (const fm of tpl.fieldMappings) {
+      if (map[fm.sourceColumn] !== undefined) map[fm.sourceColumn] = fm.targetField;
+    }
+    setColumnMap(map);
+  }
+
+  async function handleImport() {
+    setStep('importing');
+    try {
+      const ready = preview.filter(r => r.data.supplier); // require supplier minimum
+      await onImport(ready);
+      setImportResult({ success: ready.length, skipped: preview.length - ready.length });
+      setStep('done');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed');
+      setStep('preview');
+    }
+  }
+
+  async function handleSaveTemplate() {
+    if (!saveTplName.trim() || DEMO_MODE) return;
+    const supabase = createClient();
+    const tpl = await saveTemplate(supabase, {
+      name:         saveTplName.trim(),
+      description:  'Saved from import preview',
+      targetSchema: 'procurement',
+      fieldMappings: colMatches.map(m => ({ sourceColumn: m.sourceColumn, targetField: m.targetField })),
+      createdBy:    authUserEmail ?? '',
+    });
+    setTemplates(prev => [tpl, ...prev]);
+    setSaveTplName('');
+  }
+
+  // ── Confidence badge ──────────────────────────────────────────────────────
+  const confDot = (level: ColumnMatch['confidence']) => {
+    const colors: Record<string, string> = {
+      high:    'var(--color-completed)',
+      medium:  'var(--color-warning)',
+      low:     'rgba(239,68,68,.7)',
+      unmapped:'var(--color-muted)',
+    };
+    return (
+      <span style={{ display:'inline-block', width:8, height:8, borderRadius:'50%',
+        background: colors[level] ?? 'var(--color-muted)', marginRight:6, flexShrink:0 }}
+      />
+    );
+  };
+
+  // ── TARGET_FIELDS dropdown options ────────────────────────────────────────
+  const TARGET_FIELDS = [
+    { value:'',              label:'— skip —' },
+    { value:'poNumber',      label:'PO Number' },
+    { value:'supplier',      label:'Supplier' },
+    { value:'date',          label:'PO Date' },
+    { value:'amountUsd',     label:'Total Amount (USD)' },
+    { value:'status',        label:'Status' },
+    { value:'employeeName',  label:'Requester / Owner' },
+    { value:'notes',         label:'Notes / Description' },
+  ];
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <>
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" style={{ width: 'min(760px, 100vw)' }} onClick={e => e.stopPropagation()}>
+
+        <div className="panel-header">
+          <div>
+            <h3>Import from file</h3>
+            <div className="small" style={{ marginTop: 4 }}>PDF · Excel · CSV — Oracle PO format</div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="panel-body">
+
+          {/* ── IDLE: file drop zone ──────────────────────────────────── */}
+          {step === 'idle' && (
+            <>
+              <div
+                className={`import-dropzone${dragOver ? ' import-dropzone-active' : ''}`}
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={e => {
+                  e.preventDefault(); setDragOver(false);
+                  const f = e.dataTransfer.files[0];
+                  if (f) handleFile(f);
+                }}
+                onClick={() => document.getElementById('import-file-input')?.click()}
+              >
+                <div style={{ fontSize: 32, marginBottom: 10 }}>📂</div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Drop file here or click to browse</div>
+                <div className="small">PDF, Excel (.xlsx) or CSV exported from Oracle</div>
+                <input
+                  id="import-file-input"
+                  type="file"
+                  accept=".pdf,.xlsx,.xls,.csv"
+                  style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+                />
+              </div>
+              {error && <div className="import-error">{error}</div>}
+              {templates.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <div className="kpi-label" style={{ marginBottom: 6 }}>Saved templates</div>
+                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                    {templates.map(t => (
+                      <span key={t.id} className="pill" style={{ cursor:'default', fontSize:11 }}>
+                        {t.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── PARSING ───────────────────────────────────────────────── */}
+          {step === 'parsing' && (
+            <div className="panel-empty">
+              <div className="panel-empty-icon">⏳</div>
+              <div>Parsing file…</div>
+            </div>
+          )}
+
+          {/* ── MAPPING: column mapper ────────────────────────────────── */}
+          {step === 'mapping' && (
+            <>
+              <div style={{ marginBottom: 14 }}>
+                <div className="section-title" style={{ marginBottom: 8 }}>Column Mapping</div>
+                <div className="small" style={{ marginBottom: 12 }}>
+                  Detected {colMatches.length} column{colMatches.length !== 1 ? 's' : ''}. Green = high confidence auto-mapped · Amber = fuzzy match · Red = low confidence · Grey = unmapped.
+                </div>
+                {templates.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div className="kpi-label" style={{ marginBottom: 4 }}>Apply saved template</div>
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                      {templates.map(t => (
+                        <button key={t.id} onClick={() => applyTemplate(t)}
+                          style={{ background:'rgba(91,141,238,.12)', border:'1px solid rgba(91,141,238,.3)', color:'var(--color-accent)', borderRadius:8, padding:'4px 12px', cursor:'pointer', fontSize:12, fontFamily:'inherit' }}>
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <table className="record-table" style={{ marginBottom: 0 }}>
+                  <thead><tr><th>Source column</th><th>Confidence</th><th>Maps to</th></tr></thead>
+                  <tbody>
+                    {colMatches.map(m => (
+                      <tr key={m.sourceColumn}>
+                        <td><span className="rec-id">{m.sourceColumn}</span></td>
+                        <td style={{ display:'flex', alignItems:'center' }}>
+                          {confDot(m.confidence)}
+                          <span className="small" style={{ textTransform:'capitalize' }}>{m.confidence}</span>
+                        </td>
+                        <td>
+                          <select
+                            className="hist-select"
+                            style={{ width:'100%' }}
+                            value={columnMap[m.sourceColumn] ?? ''}
+                            onChange={e => setColumnMap(prev => ({ ...prev, [m.sourceColumn]: e.target.value || null }))}
+                          >
+                            {TARGET_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display:'flex', gap:10, flexWrap:'wrap', alignItems:'center', marginTop: 8 }}>
+                <button className="save-button" style={{ marginTop:0 }} onClick={() => setStep('preview')}>
+                  Preview →
+                </button>
+                <button onClick={onClose} style={{ background:'rgba(255,255,255,.07)', border:'1px solid var(--color-border)', color:'#e8eef7', borderRadius:12, padding:'11px 20px', cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>
+                  Cancel
+                </button>
+                <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
+                  <input
+                    className="input"
+                    style={{ margin:0, width:180 }}
+                    placeholder="Save mapping as…"
+                    value={saveTplName}
+                    onChange={e => setSaveTplName(e.target.value)}
+                  />
+                  <button
+                    onClick={handleSaveTemplate}
+                    disabled={!saveTplName.trim()}
+                    style={{ background:'rgba(91,141,238,.12)', border:'1px solid rgba(91,141,238,.3)', color:'var(--color-accent)', borderRadius:10, padding:'8px 14px', cursor:'pointer', fontSize:12, fontFamily:'inherit', opacity: saveTplName.trim() ? 1 : 0.4 }}
+                  >
+                    Save template
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── PREVIEW: mapped records table ────────────────────────── */}
+          {step === 'preview' && (
+            <>
+              <div className="section-title" style={{ marginBottom: 8 }}>
+                Import Preview — {preview.length} record{preview.length !== 1 ? 's' : ''}
+                {' '}
+                <span className="pill pill-green" style={{ fontSize:11 }}>
+                  {preview.filter(r => r.status === 'ready').length} ready
+                </span>
+                {' '}
+                {preview.filter(r => r.status === 'needs_review').length > 0 && (
+                  <span className="pill pill-amber" style={{ fontSize:11 }}>
+                    {preview.filter(r => r.status === 'needs_review').length} needs review
+                  </span>
+                )}
+              </div>
+              <div className="small" style={{ marginBottom:10 }}>
+                All records will be imported. Records marked <b>Needs Review</b> will be saved with a flag in notes.
+              </div>
+              <table className="record-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>PO Number</th>
+                    <th>Supplier</th>
+                    <th>Amount</th>
+                    <th>Date</th>
+                    <th>Owner</th>
+                    <th>Issues</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.map(r => (
+                    <tr key={r.id}>
+                      <td>
+                        <span title={r.status === 'ready' ? 'Ready' : 'Needs review'}
+                          style={{ fontSize:14 }}>{r.status === 'ready' ? '✅' : '⚠️'}</span>
+                      </td>
+                      <td><span className="rec-id">{r.data.poNumber || '—'}</span></td>
+                      <td><b>{r.data.supplier || '—'}</b></td>
+                      <td style={{ color: r.data.amountUsd ? 'var(--color-completed)' : 'var(--color-muted)', fontWeight:700 }}>
+                        {r.data.amountUsd ? `$${r.data.amountUsd.toLocaleString()}` : '—'}
+                      </td>
+                      <td><span className="small">{r.data.date || '—'}</span></td>
+                      <td><span className="small">{r.data.employeeName || '—'}</span></td>
+                      <td>
+                        {r.issues.length > 0 ? (
+                          <span className="small" style={{ color:'var(--color-warning)' }}>
+                            {r.issues.map(i => i.reason).join(' · ')}
+                          </span>
+                        ) : (
+                          <span className="small" style={{ color:'var(--color-completed)' }}>OK</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {error && <div className="import-error" style={{ marginTop:12 }}>{error}</div>}
+              <div style={{ display:'flex', gap:10, marginTop:16 }}>
+                <button className="save-button" style={{ marginTop:0 }}
+                  onClick={handleImport}
+                  disabled={preview.length === 0}>
+                  Import {preview.length} record{preview.length !== 1 ? 's' : ''}
+                </button>
+                {sourceType !== 'pdf' && (
+                  <button onClick={() => setStep('mapping')}
+                    style={{ background:'rgba(255,255,255,.07)', border:'1px solid var(--color-border)', color:'#e8eef7', borderRadius:12, padding:'11px 20px', cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>
+                    ← Edit mapping
+                  </button>
+                )}
+                <button onClick={onClose}
+                  style={{ background:'transparent', border:'none', color:'var(--color-muted)', cursor:'pointer', fontSize:14 }}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── IMPORTING ─────────────────────────────────────────────── */}
+          {step === 'importing' && (
+            <div className="panel-empty">
+              <div className="panel-empty-icon">📥</div>
+              <div>Importing records…</div>
+            </div>
+          )}
+
+          {/* ── DONE ──────────────────────────────────────────────────── */}
+          {step === 'done' && importResult && (
+            <div style={{ textAlign:'center', padding:'32px 0' }}>
+              <div style={{ fontSize:40, marginBottom:16 }}>✅</div>
+              <div style={{ fontSize:18, fontWeight:700, marginBottom:8 }}>Import complete</div>
+              <div className="small">
+                {importResult.success} record{importResult.success !== 1 ? 's' : ''} imported successfully.
+                {importResult.skipped > 0 && ` ${importResult.skipped} skipped (missing required supplier).`}
+              </div>
+              <button className="save-button" style={{ marginTop:24 }} onClick={onClose}>
+                Done
+              </button>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Procurement Page ──────────────────────────────────────────────────────
+
+function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUserId }: {
+  timeFilter: TimeFilter;
+  activeTeamMembers: TeamMember[];
+  authUserEmail?: string;
+  authUserId?: string;
+}) {
+  const [records,    setRecords]    = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
+  const [loading,    setLoading]    = useState(!DEMO_MODE);
+  const [selected,   setSelected]   = useState<ProcurementCategory | null>(null);
+  const [showForm,   setShowForm]   = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [editingId,  setEditingId]  = useState<string | null>(null);
+  const [saveErr,    setSaveErr]    = useState('');
 
   useEffect(() => {
     if (DEMO_MODE) return;
@@ -1259,9 +1645,86 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail }: {
     }
   };
 
+  // Bulk import: inserts each mapped record + creates a support_log for Activity Feed
+  const handleBulkImport = async (mapped: MappedRecord<ProcurementRecord>[]) => {
+    const defaultEmployee = activeTeamMembers.find(m => m.id === authUserEmail);
+    for (let i = 0; i < mapped.length; i++) {
+      const m = mapped[i];
+      const finalEmployeeId   = m.data.employeeId   ?? authUserEmail ?? '';
+      const finalEmployeeName = m.data.employeeName ?? defaultEmployee?.name ?? 'Operations Team';
+      const needsReview       = m.status === 'needs_review';
+
+      const record: ProcurementRecord = {
+        id:           m.id,
+        employeeId:   finalEmployeeId,
+        employeeName: finalEmployeeName,
+        poNumber:     m.data.poNumber  ?? '',
+        supplier:     m.data.supplier  ?? '',
+        amountUsd:    m.data.amountUsd ?? 0,
+        category:     m.data.category  ?? 'PO Created',
+        status:       m.data.status    ?? 'Open',
+        notes:        (needsReview ? '[NEEDS REVIEW] ' : '') + (m.data.notes ?? ''),
+        date:         m.data.date ?? new Date().toISOString().slice(0, 10),
+      };
+
+      if (!DEMO_MODE) {
+        // Store raw import metadata alongside the record
+        const rawImport = { ...m.rawImport, extractedRows: undefined }; // trim for size
+        const supabase = createClient();
+        const { error } = await supabase
+          .from('procurement_records')
+          .insert({
+            id:            record.id,
+            employee_id:   record.employeeId,
+            employee_name: record.employeeName,
+            po_number:     record.poNumber || null,
+            supplier:      record.supplier,
+            amount_usd:    record.amountUsd || null,
+            category:      record.category,
+            status:        record.status,
+            notes:         record.notes,
+            activity_date: record.date,
+            raw_import:    rawImport,
+          })
+          .select('id');
+        if (error) { console.error('import insert:', error.message); continue; }
+
+        // Create support_log so imported PO appears in Activity Feed + Team Last Updates
+        if (authUserId) {
+          const summaryTitle =
+            `PO imported: ${record.poNumber || 'N/A'} — ${record.supplier} — $${(record.amountUsd || 0).toLocaleString()}`;
+          const logEntry: SupportLog = {
+            id:           `LOG-import-${Date.now()}-${i}`,
+            employeeId:   finalEmployeeId,
+            employeeName: finalEmployeeName,
+            department:   'Operations',
+            category:     'Procurement',
+            title:        summaryTitle,
+            hours:        0,
+            date:         record.date,
+            week:         getWeekTag(record.date),
+            notes:        `Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
+          };
+          await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
+        }
+      }
+
+      setRecords(prev => [...prev, record]);
+    }
+    setShowImport(false);
+  };
+
   return (
     <>
       {selected && <ProcurementDrillDown category={selected} records={records} onClose={() => setSelected(null)} />}
+      {showImport && (
+        <ProcurementImportPanel
+          onImport={handleBulkImport}
+          onClose={() => setShowImport(false)}
+          activeTeamMembers={activeTeamMembers}
+          authUserEmail={authUserEmail}
+        />
+      )}
 
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
@@ -1270,9 +1733,17 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail }: {
             <div className="small">Purchase orders, payments and emergency requests · {getTimeFilterLabel(timeFilter)}</div>
           </div>
           {!showForm && (
-            <button className="save-button" style={{ marginTop: 0, flexShrink: 0 }} onClick={() => setShowForm(true)}>
-              + Log Procurement
-            </button>
+            <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+              <button className="save-button" style={{ marginTop:0 }} onClick={() => setShowForm(true)}>
+                + Log Procurement
+              </button>
+              <button
+                onClick={() => setShowImport(true)}
+                style={{ background:'rgba(91,141,238,.12)', border:'1px solid rgba(91,141,238,.3)', color:'var(--color-accent)', borderRadius:12, padding:'11px 18px', cursor:'pointer', fontSize:14, fontWeight:700, fontFamily:'inherit', whiteSpace:'nowrap' }}
+              >
+                ↑ Import file
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -2271,7 +2742,7 @@ export default function App() {
   let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
-  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} />;
+  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} authUserId={authUser?.id} />;
   if (page === 'Operations')                   content = <OperationsPage  timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
