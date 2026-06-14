@@ -291,52 +291,22 @@ async function updateOperationsInDB(id: string, patch: Partial<OperationsRecord>
   if (error) throw new Error(error.message);
 }
 
-// ─── Procurement soft-delete ───────────────────────────────────────────────
+// ─── Procurement soft-delete (RPC) ────────────────────────────────────────
+// Uses a SECURITY DEFINER Postgres function so the UPDATE bypasses the SELECT
+// policy (deleted_at IS NULL).  Permission is enforced inside the function:
+// only the record creator, the selected employee, or an admin may delete.
 
 async function softDeleteProcurementRecord(
   id: string,
-  deletedByEmail: string,
   reason: string
 ): Promise<void> {
-  // The Supabase JS client sends no explicit Prefer header for .update(), so
-  // PostgREST defaults to return=representation (RETURNING * in the SQL).
-  // After setting deleted_at, the new row fails the SELECT policy
-  // (deleted_at IS NULL), and PostgreSQL raises "new row violates row-level
-  // security policy" during the RETURNING evaluation — even though the UPDATE
-  // itself is allowed.
-  //
-  // Fix: use raw fetch with Prefer: return=minimal.  This tells PostgREST to
-  // emit the UPDATE without a RETURNING clause, so the SELECT policy is never
-  // evaluated against the new row and the soft delete succeeds.
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Not authenticated');
-
-  const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/procurement_records?id=eq.${encodeURIComponent(id)}`;
-  const response = await fetch(url, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type':  'application/json',
-      'apikey':        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      'Authorization': `Bearer ${session.access_token}`,
-      'Prefer':        'return=minimal',
-    },
-    body: JSON.stringify({
-      deleted_at:      new Date().toISOString(),
-      deleted_by:      deletedByEmail,
-      deletion_reason: reason || null,
-    }),
+  const { data, error } = await supabase.rpc('soft_delete_procurement_record', {
+    record_id: id,
+    reason:    reason || null,
   });
-
-  if (!response.ok) {
-    let message = `Delete failed (${response.status})`;
-    try {
-      const err = await response.json();
-      message = err.message ?? err.hint ?? message;
-    } catch { /* non-JSON body */ }
-    console.error('softDeleteProcurementRecord error:', message);
-    throw new Error(message);
-  }
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Delete failed: no confirmation returned from server.');
 }
 
 // ─── Money display helpers ─────────────────────────────────────────────────
@@ -1845,7 +1815,7 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
 
   const handleDelete = async (record: ProcurementRecord, reason: string) => {
     try {
-      if (!DEMO_MODE) await softDeleteProcurementRecord(record.id, authUserEmail ?? '', reason);
+      if (!DEMO_MODE) await softDeleteProcurementRecord(record.id, reason);
       setRecords(prev => prev.filter(r => r.id !== record.id));
       onRecordDeleted?.(record.id);
       setDeletingRecord(null);
