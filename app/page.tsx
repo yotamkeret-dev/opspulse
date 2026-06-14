@@ -299,15 +299,18 @@ async function softDeleteProcurementRecord(
   reason: string
 ): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('procurement_records')
     .update({
       deleted_at:       new Date().toISOString(),
       deleted_by:       deletedByEmail,
       deletion_reason:  reason || null,
     })
-    .eq('id', id);
+    .eq('id', id)
+    .select('id');
   if (error) throw new Error(error.message);
+  // If RLS blocks the update, Supabase returns no error but 0 rows.
+  if (!data || data.length === 0) throw new Error('Delete was blocked. You may not have permission to delete this record, or the record no longer exists.');
 }
 
 // ─── Money display helpers ─────────────────────────────────────────────────
@@ -587,13 +590,25 @@ function KPIDetailPanel({ kpi, timeFilter, onClose }: { kpi: DashboardKpi; timeF
 
 // ─── Team Member Contribution Panel (Last Updates on Executive Dashboard) ──
 
-function TeamMemberPanel({ memberName, timeFilter, supportLogs, onClose }: {
-  memberName: string; timeFilter: TimeFilter; supportLogs: SupportLog[]; onClose: () => void;
+function TeamMemberPanel({ memberName, timeFilter, allActivities, onClose }: {
+  memberName: string; timeFilter: TimeFilter; allActivities: UnifiedActivity[]; onClose: () => void;
 }) {
-  const logs = filterLogsByTimeFilter(supportLogs, timeFilter).filter(l => l.employeeName === memberName);
-  const hours = logs.reduce((s, l) => s + l.hours, 0);
-  const depts = [...new Set(logs.map(l => l.department))];
-  const byDept = buildSupportByDept(logs);
+  const { start, end } = getDateRangeForFilter(timeFilter);
+  end.setHours(23, 59, 59, 999);
+  const activities = allActivities.filter(a => {
+    const d = new Date(a.date + 'T00:00:00');
+    return a.employeeName === memberName && d >= start && d <= end;
+  });
+
+  // Per-type counts for the header summary
+  const typeCounts: Record<string, number> = {};
+  for (const a of activities) typeCounts[a.type] = (typeCounts[a.type] ?? 0) + 1;
+  const headerSummary = Object.entries(typeCounts).map(([t, n]) => `${n} ${t}`).join(' · ');
+
+  const typeColor: Record<string, string> = {
+    support: 'var(--color-completed)', procurement: 'var(--color-warning)', operations: 'var(--color-accent)',
+  };
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', h);
@@ -608,53 +623,48 @@ function TeamMemberPanel({ memberName, timeFilter, supportLogs, onClose }: {
           <div>
             <h3>{memberName}</h3>
             <div className="small" style={{ marginTop: 4 }}>
-              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {getTimeFilterLabel(timeFilter)}
+              {activities.length} {activities.length === 1 ? 'activity' : 'activities'}{headerSummary ? ` · ${headerSummary}` : ''} · {getTimeFilterLabel(timeFilter)}
             </div>
           </div>
           <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="panel-body">
-          {logs.length === 0 ? (
+          {activities.length === 0 ? (
             <div className="panel-empty">
               <div className="panel-empty-icon">📊</div>
               <div>No contributions logged for this period</div>
             </div>
           ) : (
-            <>
-              <div style={{ marginBottom: 20 }}>
-                <div className="task-section-header" style={{ marginBottom: 8 }}>
-                  <span className="task-section-title">Hours by Department</span>
-                </div>
-                {byDept.map(({ name, hours: h }) => (
-                  <div key={name} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,.05)', fontSize: 13 }}>
-                    <span>{name}</span>
-                    <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{h}h</span>
-                  </div>
-                ))}
+            <div>
+              <div className="task-section-header" style={{ marginBottom: 8 }}>
+                <span className="task-section-title">Activity Log</span>
+                <span className="task-count">{activities.length}</span>
               </div>
-              <div>
-                <div className="task-section-header" style={{ marginBottom: 8 }}>
-                  <span className="task-section-title">Activity Log</span>
-                  <span className="task-count">{logs.length}</span>
-                </div>
-                <table className="record-table">
-                  <thead><tr><th>Activity</th><th>Dept</th><th>Hours</th><th>Date</th></tr></thead>
-                  <tbody>
-                    {logs.map(l => (
-                      <tr key={l.id}>
-                        <td>
-                          <div className="rec-name">{l.title}</div>
-                          {l.notes && <div className="rec-notes">{l.notes}</div>}
-                        </td>
-                        <td><span className="pill" style={{ fontSize: 11, padding: '2px 6px' }}>{l.department}</span></td>
-                        <td style={{ fontWeight: 700, color: 'var(--color-completed)', whiteSpace: 'nowrap' }}>{l.hours}h</td>
-                        <td><span className="small">{l.date}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
+              <table className="record-table">
+                <thead><tr><th>Type</th><th>Activity</th><th>Detail</th><th>Date</th></tr></thead>
+                <tbody>
+                  {activities.map(a => (
+                    <tr key={a.id}>
+                      <td>
+                        <span className="pill" style={{ fontSize: 10, color: typeColor[a.type] ?? 'var(--color-muted)', padding: '2px 6px' }}>
+                          {a.type}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="rec-name">{a.title}</div>
+                        {a.notes && <div className="rec-notes">{a.notes}</div>}
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {a.amountUsd != null && a.amountUsd > 0 && <MoneyCell record={{ amountUsd: a.amountUsd, originalAmount: a.originalAmount, originalCurrency: a.originalCurrency }} />}
+                        {a.quantity   != null && <span style={{ fontWeight: 700, color: 'var(--color-accent)' }}>{a.quantity} units</span>}
+                        {a.hours      != null && a.hours > 0 && <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{a.hours}h</span>}
+                      </td>
+                      <td><span className="small">{a.date}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>
@@ -896,7 +906,7 @@ function ExecSummaryCard({ currentLogs, previousLogs, currentProc, previousProc 
 
 // ─── Executive Dashboard ───────────────────────────────────────────────────
 
-function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[] }) {
+function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[]; allActivities: UnifiedActivity[] }) {
   const [selectedKpi,          setSelectedKpi]          = useState<DashboardKpi | null>(null);
   const [selectedMember,       setSelectedMember]       = useState<string | null>(null);
   const [selectedProcCategory, setSelectedProcCategory] = useState<ProcurementCategory | null>(null);
@@ -1020,7 +1030,7 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
       {selectedKpi          && <KPIDetailPanel kpi={selectedKpi} timeFilter={timeFilter} onClose={() => setSelectedKpi(null)} />}
       {selectedProcCategory && <ProcurementDrillDown category={selectedProcCategory} records={procRecords} onClose={() => setSelectedProcCategory(null)} />}
       {selectedOpsCategory  && <OperationsDrillDown category={selectedOpsCategory} records={opsRecords} onClose={() => setSelectedOpsCategory(null)} />}
-      {selectedMember       && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} supportLogs={supportLogs} onClose={() => setSelectedMember(null)} />}
+      {selectedMember       && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} allActivities={allActivities} onClose={() => setSelectedMember(null)} />}
 
       {/* ── Executive Summary ────────────────────────────────────────── */}
       <ExecSummaryCard
@@ -1078,9 +1088,16 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
           <h2 className="section-title">Team Last Updates</h2>
           <div className="team-pulse-list">
             {(() => {
-              const active = activeTeamMembers.filter(m =>
-                filtered.some(l => l.employeeName === m.name)
-              );
+              // Filter the unified activity stream to the current time period
+              const { start, end } = getDateRangeForFilter(timeFilter);
+              end.setHours(23, 59, 59, 999);
+              const periodActivities = allActivities.filter(a => {
+                const d = new Date(a.date + 'T00:00:00');
+                return d >= start && d <= end;
+              });
+              // All team members who have any activity (any type) in the period
+              const activeNames = new Set(periodActivities.map(a => a.employeeName));
+              const active = activeTeamMembers.filter(m => activeNames.has(m.name));
               if (active.length === 0) {
                 return (
                   <div className="panel-empty" style={{ padding: '20px 0 8px' }}>
@@ -1090,18 +1107,19 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers }: { timeFilter:
                 );
               }
               return active.map(m => {
-                const memberLogs = filtered.filter(l => l.employeeName === m.name);
-                const hours = memberLogs.reduce((s, l) => s + l.hours, 0);
-                const depts = [...new Set(memberLogs.map(l => l.department))];
-                const lines: string[] = [];
-                if (hours > 0) lines.push(`${hours}h delivered`);
-                if (depts.length > 0) lines.push(depts.slice(0, 2).join(' · '));
+                const memberActivities = periodActivities.filter(a => a.employeeName === m.name);
+                // Count by type — any future activity type appears automatically
+                const typeCounts: Record<string, number> = {};
+                for (const a of memberActivities) typeCounts[a.type] = (typeCounts[a.type] ?? 0) + 1;
+                const summary = Object.entries(typeCounts)
+                  .map(([t, n]) => `${n} ${t}`)
+                  .join(' · ');
                 return (
                   <div key={m.name} className="team-pulse-item">
                     <span className="pulse-check">✓</span>
                     <div className="pulse-info">
                       <div className="pulse-name">{m.name}</div>
-                      {lines.length > 0 && <div className="pulse-summary">{lines.join(' · ')}</div>}
+                      {summary && <div className="pulse-summary">{summary}</div>}
                     </div>
                     <button className="last-updates-btn" onClick={() => openMember(m.name)}>
                       Last Updates ↗
@@ -1185,9 +1203,7 @@ function ProcurementDrillDown({ category, records, onClose }: {
                       <div className="rec-name">{r.supplier}</div>
                       {r.notes && <div className="rec-notes">{r.notes}</div>}
                     </td>
-                    <td style={{ fontWeight: 700, color: r.amountUsd > 0 ? 'var(--color-completed)' : 'var(--color-muted)', whiteSpace: 'nowrap' }}>
-                      {r.amountUsd > 0 ? `$${r.amountUsd.toLocaleString()}` : '—'}
-                    </td>
+                    <td><MoneyCell record={r} /></td>
                     <td>{r.employeeName}</td>
                     <td><span className="small">{r.date}</span></td>
                     <td>
@@ -1758,11 +1774,13 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
 
 // ─── Procurement Page ──────────────────────────────────────────────────────
 
-function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUserId }: {
+function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUserId, onRecordAdded, onRecordDeleted }: {
   timeFilter: TimeFilter;
   activeTeamMembers: TeamMember[];
   authUserEmail?: string;
   authUserId?: string;
+  onRecordAdded?: (record: ProcurementRecord) => void;
+  onRecordDeleted?: (id: string) => void;
 }) {
   const [records,      setRecords]      = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
   const [loading,      setLoading]      = useState(!DEMO_MODE);
@@ -1792,6 +1810,7 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
       const withOwner = { ...record, createdBy: authUserEmail };
       if (!DEMO_MODE) await insertProcurementToDB(withOwner, authUserEmail);
       setRecords(prev => [withOwner, ...prev]);
+      onRecordAdded?.(withOwner);
       setShowForm(false);
     } catch (err) {
       setSaveErr(err instanceof Error ? err.message : 'Failed to save record.');
@@ -1802,6 +1821,7 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
     try {
       if (!DEMO_MODE) await softDeleteProcurementRecord(record.id, authUserEmail ?? '', reason);
       setRecords(prev => prev.filter(r => r.id !== record.id));
+      onRecordDeleted?.(record.id);
       setDeletingRecord(null);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete record.');
@@ -1836,16 +1856,21 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
       const needsReview       = m.status === 'needs_review';
 
       const record: ProcurementRecord = {
-        id:           m.id,
-        employeeId:   finalEmployeeId,
-        employeeName: finalEmployeeName,
-        poNumber:     m.data.poNumber  ?? '',
-        supplier:     m.data.supplier  ?? '',
-        amountUsd:    m.data.amountUsd ?? 0,
-        category:     m.data.category  ?? 'PO Created',
-        status:       m.data.status    ?? 'Open',
-        notes:        (needsReview ? '[NEEDS REVIEW] ' : '') + (m.data.notes ?? ''),
-        date:         m.data.date ?? new Date().toISOString().slice(0, 10),
+        id:               m.id,
+        employeeId:       finalEmployeeId,
+        employeeName:     finalEmployeeName,
+        poNumber:         m.data.poNumber  ?? '',
+        supplier:         m.data.supplier  ?? '',
+        amountUsd:        m.data.amountUsd ?? 0,
+        category:         m.data.category  ?? 'PO Created',
+        status:           m.data.status    ?? 'Open',
+        notes:            (needsReview ? '[NEEDS REVIEW] ' : '') + (m.data.notes ?? ''),
+        date:             m.data.date ?? new Date().toISOString().slice(0, 10),
+        originalAmount:   m.data.originalAmount   ?? m.data.amountUsd ?? undefined,
+        originalCurrency: m.data.originalCurrency ?? 'USD',
+        exchangeRate:     m.data.exchangeRate      ?? undefined,
+        exchangeRateDate: m.data.exchangeRateDate  ?? undefined,
+        createdBy:        authUserEmail ?? undefined,
       };
 
       if (!DEMO_MODE) {
@@ -1855,20 +1880,26 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
         const { error } = await supabase
           .from('procurement_records')
           .insert({
-            id:            record.id,
-            employee_id:   record.employeeId,
-            employee_name: record.employeeName,
-            po_number:     record.poNumber || null,
-            supplier:      record.supplier,
-            amount_usd:    record.amountUsd || null,
-            category:      record.category,
-            status:        record.status,
-            notes:         record.notes,
-            activity_date: record.date,
-            raw_import:    rawImport,
+            id:                 record.id,
+            employee_id:        record.employeeId,
+            employee_name:      record.employeeName,
+            po_number:          record.poNumber || null,
+            supplier:           record.supplier,
+            amount_usd:         record.amountUsd || null,
+            category:           record.category,
+            status:             record.status,
+            notes:              record.notes,
+            activity_date:      record.date,
+            raw_import:         rawImport,
+            original_amount:    record.originalAmount   ?? record.amountUsd ?? null,
+            original_currency:  record.originalCurrency ?? 'USD',
+            exchange_rate:      record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
+            exchange_rate_date: record.exchangeRateDate  ?? null,
+            created_by:         record.createdBy         ?? null,
           })
           .select('id');
         if (error) { console.error('import insert:', error.message); continue; }
+        onRecordAdded?.(record);
 
         // Create support_log so imported PO appears in Activity Feed + Team Last Updates
         if (authUserId) {
@@ -2231,10 +2262,11 @@ function OperationsEntryForm({ onSave, onCancel, activeTeamMembers }: {
 
 // ─── Operations Page (live data) ───────────────────────────────────────────
 
-function OperationsPage({ timeFilter, activeTeamMembers, authUserEmail }: {
+function OperationsPage({ timeFilter, activeTeamMembers, authUserEmail, onRecordAdded }: {
   timeFilter: TimeFilter;
   activeTeamMembers: TeamMember[];
   authUserEmail?: string;
+  onRecordAdded?: (record: OperationsRecord) => void;
 }) {
   const [records,   setRecords]   = useState<OperationsRecord[]>([]);
   const [loading,   setLoading]   = useState(true);
@@ -2265,6 +2297,7 @@ function OperationsPage({ timeFilter, activeTeamMembers, authUserEmail }: {
     try {
       if (!DEMO_MODE) await insertOperationsToDB(record);
       setRecords(prev => [record, ...prev]);
+      onRecordAdded?.(record);
       setShowForm(false);
     } catch (err) { setSaveErr(err instanceof Error ? err.message : 'Failed to save.'); }
   };
@@ -2677,12 +2710,7 @@ function ActivityFeed({ timeFilter, allActivities, supportLogs, authUserEmail, o
                     <span className="pill">{a.category}</span>
                     <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{a.title}</h3>
                     {a.amountUsd != null && a.amountUsd > 0 && (
-                      <span style={{ fontSize:12, color:'var(--color-completed)', fontWeight:700 }}>
-                        ${a.amountUsd.toLocaleString()}
-                        {a.originalCurrency && a.originalCurrency !== 'USD' && (
-                          <span style={{ color:'var(--color-muted)', fontWeight:400 }}> ({currencySymbol(a.originalCurrency)}{a.originalAmount?.toLocaleString()} {a.originalCurrency})</span>
-                        )}
-                      </span>
+                      <MoneyCell record={{ amountUsd: a.amountUsd, originalAmount: a.originalAmount, originalCurrency: a.originalCurrency }} />
                     )}
                     {a.quantity != null && <span style={{ fontSize:12, color:'var(--color-accent)', fontWeight:700 }}> {a.quantity} units</span>}
                     {a.notes && <div className="small">{a.notes}</div>}
@@ -2874,6 +2902,15 @@ export default function App() {
     }
   }, []);
 
+  // ── Re-fetch proc/ops for the unified stream when timeFilter changes ─────
+  // The bootstrap fetches once with the initial filter; this keeps the unified
+  // activity stream (and Team Last Updates) current when the user changes periods.
+  useEffect(() => {
+    if (DEMO_MODE || !authUser) return;
+    fetchProcurementFromDB(timeFilter).then(setDbProcRecords).catch(() => {});
+    fetchOperationsFromDB(timeFilter).then(setDbOpsRecords).catch(() => {});
+  }, [timeFilter, authUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Real-time: push inserts from other users into local state ────────────
   // Requires "Realtime" enabled on the support_logs table in Supabase dashboard.
   useEffect(() => {
@@ -2962,11 +2999,11 @@ export default function App() {
   const period = timeFilterToPeriod(timeFilter);
   const data   = timeRangeData[period];
 
-  let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
+  let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} allActivities={allActivities} />;
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
-  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} authUserId={authUser?.id} />;
-  if (page === 'Operations')                   content = <OperationsPage  timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} />;
+  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} authUserId={authUser?.id} onRecordAdded={r => setDbProcRecords(prev => [r, ...prev.filter(x => x.id !== r.id)])} onRecordDeleted={id => setDbProcRecords(prev => prev.filter(r => r.id !== id))} />;
+  if (page === 'Operations')                   content = <OperationsPage  timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} onRecordAdded={r => setDbOpsRecords(prev => [r, ...prev.filter(x => x.id !== r.id)])} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} allActivities={allActivities} supportLogs={supportLogs} authUserEmail={authUser?.email} onUpdateLog={updateLog} />;
