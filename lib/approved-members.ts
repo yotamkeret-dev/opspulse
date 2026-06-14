@@ -28,3 +28,20 @@ export const APPROVED_EMAILS: readonly string[] = [
 export function isApproved(email: string | null | undefined): boolean {
   return APPROVED_EMAILS.includes((email ?? '').toLowerCase());
 }
+
+/**
+ * Admin users — can delete any Procurement record regardless of ownership.
+ *
+ * HOW TO ADD AN ADMIN:
+ *   1. Add their email here.
+ *   2. Re-run the is_procurement_admin() function in supabase/migrations/004_soft_delete.sql
+ *      with the same updated list, so RLS enforcement stays in sync.
+ *   3. Redeploy.
+ */
+export const ADMIN_EMAILS: readonly string[] = [
+  'yotam.keret@orca-ai.io',
+];
+
+export function isAdmin(email: string | null | undefined): boolean {
+  return ADMIN_EMAILS.includes((email ?? '').toLowerCase());
+}

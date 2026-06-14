@@ -179,11 +179,23 @@ export type ProcurementRecord = {
   employeeName: string;           // → employee_name
   poNumber:     string;           // → po_number (required for 'PO Created')
   supplier:     string;           // required
-  amountUsd:    number;           // → amount_usd (0 if not applicable)
+  amountUsd:    number;           // → amount_usd  (always USD, after conversion)
   category:     ProcurementCategory;
   status:       ProcurementStatus;
   notes:        string;
   date:         string;           // YYYY-MM-DD → activity_date
+
+  // ── Multi-currency (optional — null for legacy records) ──────────────────
+  originalAmount?:    number;     // → original_amount   (raw value before conversion)
+  originalCurrency?:  string;     // → original_currency (ISO 4217, e.g. 'ILS', 'EUR')
+  exchangeRate?:      number;     // → exchange_rate      (rate used at import time)
+  exchangeRateDate?:  string;     // → exchange_rate_date (YYYY-MM-DD; null = fallback rate)
+
+  // ── Ownership + soft delete ───────────────────────────────────────────────
+  createdBy?:         string;     // → created_by      (email of creator)
+  deletedAt?:         string;     // → deleted_at      (ISO; null = active)
+  deletedBy?:         string;     // → deleted_by
+  deletionReason?:    string;     // → deletion_reason
 };
 
 // Demo-mode seed records (current week W23, Jun 1–4 2026)
@@ -878,3 +890,81 @@ export const ACTIVITY_CATEGORIES = [
 ] as const;
 
 export type ActivityCategory = typeof ACTIVITY_CATEGORIES[number];
+
+// ─── Unified Activity Stream ───────────────────────────────────────────────
+// Merges support_logs + procurement_records + operations_records into one
+// shape consumed by Activity Feed, Team Last Updates, and Team Contributions.
+
+export type UnifiedActivityType = 'support' | 'procurement' | 'operations';
+
+export type UnifiedActivity = {
+  id:               string;
+  type:             UnifiedActivityType;
+  title:            string;
+  employeeName:     string;
+  employeeId:       string;
+  date:             string;           // YYYY-MM-DD
+  category:         string;
+  notes:            string;
+  // type-specific (optional)
+  hours?:           number;           // support only
+  amountUsd?:       number;           // procurement only
+  originalAmount?:  number;
+  originalCurrency?: string;
+  quantity?:        number;           // operations only
+  status?:          string;
+  poNumber?:        string;
+};
+
+export function buildUnifiedActivities(
+  supportLogs:  SupportLog[],
+  procRecords:  ProcurementRecord[],
+  opsRecords:   OperationsRecord[],
+): UnifiedActivity[] {
+  const activities: UnifiedActivity[] = [
+    ...supportLogs.map(l => ({
+      id:           l.id,
+      type:         'support' as const,
+      title:        l.title,
+      employeeName: l.employeeName,
+      employeeId:   l.employeeId,
+      date:         l.date,
+      category:     l.category,
+      notes:        l.notes,
+      hours:        l.hours,
+    })),
+    ...procRecords
+      .filter(r => !r.deletedAt)
+      .map(r => ({
+        id:               r.id,
+        type:             'procurement' as const,
+        title:            `${r.category}: ${r.poNumber ? `PO ${r.poNumber} — ` : ''}${r.supplier}`,
+        employeeName:     r.employeeName,
+        employeeId:       r.employeeId,
+        date:             r.date,
+        category:         r.category,
+        notes:            r.notes,
+        amountUsd:        r.amountUsd,
+        originalAmount:   r.originalAmount,
+        originalCurrency: r.originalCurrency,
+        status:           r.status,
+        poNumber:         r.poNumber,
+      })),
+    ...opsRecords.map(r => ({
+      id:           r.id,
+      type:         'operations' as const,
+      title:        `${r.category}: ${r.quantity} unit${r.quantity !== 1 ? 's' : ''}`,
+      employeeName: r.employeeName,
+      employeeId:   r.employeeId,
+      date:         r.date,
+      category:     r.category,
+      notes:        r.notes,
+      quantity:     r.quantity,
+      status:       r.status,
+    })),
+  ];
+  // Sort by date descending, then by id for stable ordering
+  return activities.sort((a, b) =>
+    a.date < b.date ? 1 : a.date > b.date ? -1 : a.id < b.id ? 1 : -1
+  );
+}

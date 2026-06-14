@@ -2,6 +2,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
+import { isAdmin } from '@/lib/approved-members';
+import { convertToUsd, currencySymbol, SUPPORTED_CURRENCIES } from '@/lib/exchange-rate';
 import {
   parseFile, getHeaders, detectColumnMappings, columnMatchesToMap,
   mapOraclePORow, ORACLE_PO_RULES,
@@ -13,7 +15,7 @@ import {
   OperationsCategory, OperationsRecord, OPERATIONS_CATEGORIES, OPERATIONS_STATUSES, mockOperationsRecords,
   OperationsStatus,
   ProcurementCategory, ProcurementRecord, PROCUREMENT_CATEGORIES, PROCUREMENT_STATUSES,
-  SupportLog, TeamMember, TimeFilter,
+  SupportLog, TeamMember, TimeFilter, UnifiedActivity, buildUnifiedActivities,
   currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod, getPreviousPeriod,
   getDateRangeForFilter, getTimeFilterLabel, kpiRecords, mockProcurementRecords, seedSupportLogs,
   teamMembers, timeRangeData,
@@ -135,16 +137,26 @@ async function insertLogToDB(
 
 function rowToProcurementRecord(row: Record<string, unknown>): ProcurementRecord {
   return {
-    id:           String(row.id),
-    employeeId:   String(row.employee_id),
-    employeeName: String(row.employee_name),
-    poNumber:     String(row.po_number ?? ''),
-    supplier:     String(row.supplier),
-    amountUsd:    Number(row.amount_usd ?? 0),
-    category:     String(row.category) as ProcurementRecord['category'],
-    status:       String(row.status)   as ProcurementRecord['status'],
-    notes:        String(row.notes ?? ''),
-    date:         String(row.activity_date),
+    id:               String(row.id),
+    employeeId:       String(row.employee_id),
+    employeeName:     String(row.employee_name),
+    poNumber:         String(row.po_number ?? ''),
+    supplier:         String(row.supplier),
+    amountUsd:        Number(row.amount_usd ?? 0),
+    category:         String(row.category) as ProcurementRecord['category'],
+    status:           String(row.status)   as ProcurementRecord['status'],
+    notes:            String(row.notes ?? ''),
+    date:             String(row.activity_date),
+    // Multi-currency
+    originalAmount:   row.original_amount   != null ? Number(row.original_amount)   : undefined,
+    originalCurrency: row.original_currency ? String(row.original_currency) : 'USD',
+    exchangeRate:     row.exchange_rate      != null ? Number(row.exchange_rate)      : undefined,
+    exchangeRateDate: row.exchange_rate_date ? String(row.exchange_rate_date)         : undefined,
+    // Ownership + soft delete
+    createdBy:        row.created_by  ? String(row.created_by)  : undefined,
+    deletedAt:        row.deleted_at  ? String(row.deleted_at)  : undefined,
+    deletedBy:        row.deleted_by  ? String(row.deleted_by)  : undefined,
+    deletionReason:   row.deletion_reason ? String(row.deletion_reason) : undefined,
   };
 }
 
@@ -161,19 +173,26 @@ async function fetchProcurementFromDB(tf: TimeFilter): Promise<ProcurementRecord
   return (data ?? []).map(rowToProcurementRecord);
 }
 
-async function insertProcurementToDB(record: ProcurementRecord): Promise<void> {
+async function insertProcurementToDB(record: ProcurementRecord, createdByEmail?: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from('procurement_records').insert({
-    id:            record.id,
-    employee_id:   record.employeeId,
-    employee_name: record.employeeName,
-    po_number:     record.poNumber || null,
-    supplier:      record.supplier,
-    amount_usd:    record.amountUsd || null,
-    category:      record.category,
-    status:        record.status,
-    notes:         record.notes,
-    activity_date: record.date,
+    id:                  record.id,
+    employee_id:         record.employeeId,
+    employee_name:       record.employeeName,
+    po_number:           record.poNumber || null,
+    supplier:            record.supplier,
+    amount_usd:          record.amountUsd || null,
+    category:            record.category,
+    status:              record.status,
+    notes:               record.notes,
+    activity_date:       record.date,
+    // Multi-currency fields
+    original_amount:     record.originalAmount   ?? record.amountUsd ?? null,
+    original_currency:   record.originalCurrency ?? 'USD',
+    exchange_rate:       record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
+    exchange_rate_date:  record.exchangeRateDate  ?? null,
+    // Ownership
+    created_by:          createdByEmail ?? null,
   });
   if (error) throw new Error(error.message);
 }
@@ -270,6 +289,67 @@ async function updateOperationsInDB(id: string, patch: Partial<OperationsRecord>
     })
     .eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+// ─── Procurement soft-delete ───────────────────────────────────────────────
+
+async function softDeleteProcurementRecord(
+  id: string,
+  deletedByEmail: string,
+  reason: string
+): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('procurement_records')
+    .update({
+      deleted_at:       new Date().toISOString(),
+      deleted_by:       deletedByEmail,
+      deletion_reason:  reason || null,
+    })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// ─── Money display helpers ─────────────────────────────────────────────────
+
+interface MoneyDisplay {
+  primary:     string;   // e.g. "$1,200"
+  secondary?:  string;   // e.g. "₪4,400 ILS" — only when currency ≠ USD
+  isFallback?: boolean;  // true = estimated exchange rate
+}
+
+function formatMoney(record: {
+  amountUsd?: number;
+  originalAmount?: number;
+  originalCurrency?: string;
+  exchangeRate?: number;
+}): MoneyDisplay {
+  const usd = record.amountUsd ?? 0;
+  const primary = `$${usd.toLocaleString()}`;
+  const orig = record.originalCurrency?.toUpperCase() ?? 'USD';
+  if (orig === 'USD' || !record.originalAmount) return { primary };
+  const sym = currencySymbol(orig);
+  return {
+    primary,
+    secondary:  `${sym}${record.originalAmount.toLocaleString()} ${orig}`,
+    isFallback: !record.exchangeRate,
+  };
+}
+
+// Compact inline display for tables: "$1,200" with tooltip on hover
+function MoneyCell({ record }: { record: { amountUsd?: number; originalAmount?: number; originalCurrency?: string; exchangeRate?: number } }) {
+  const m = formatMoney(record);
+  return (
+    <span title={m.secondary ? `Original: ${m.secondary}${m.isFallback ? ' (estimated rate)' : ''}` : undefined}
+      style={{ fontWeight: 700, color: (record.amountUsd ?? 0) > 0 ? 'var(--color-completed)' : 'var(--color-muted)', whiteSpace: 'nowrap' }}>
+      {(record.amountUsd ?? 0) > 0 ? m.primary : '—'}
+      {m.secondary && (
+        <span style={{ display:'block', fontSize:10, fontWeight:500, color:'var(--color-muted)', marginTop:1 }}>
+          {m.secondary}{m.isFallback ? ' ⚠' : ''}
+        </span>
+      )}
+    </span>
+  );
 }
 
 const pages = [
@@ -1137,28 +1217,63 @@ function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
   const [category,   setCategory]   = useState<ProcurementCategory>(PROCUREMENT_CATEGORIES[0]);
   const [poNumber,   setPoNumber]   = useState('');
   const [supplier,   setSupplier]   = useState('');
-  const [amountUsd,  setAmountUsd]  = useState('');
-  const [status,     setStatus]     = useState<ProcurementRecord['status']>(PROCUREMENT_STATUSES[0]);
-  const [notes,      setNotes]      = useState('');
-  const [date,       setDate]       = useState(new Date().toISOString().slice(0, 10));
+  const [amount,      setAmount]      = useState('');
+  const [currency,    setCurrency]    = useState('USD');
+  const [status,      setStatus]      = useState<ProcurementRecord['status']>(PROCUREMENT_STATUSES[0]);
+  const [notes,       setNotes]       = useState('');
+  const [date,        setDate]        = useState(new Date().toISOString().slice(0, 10));
+  const [converting,  setConverting]  = useState(false);
 
-  const save = () => {
+  const save = async () => {
     if (!employeeId)              { alert('Please select an employee.'); return; }
     if (!supplier.trim())         { alert('Supplier is required.'); return; }
     if (category === 'PO Created' && !poNumber.trim()) { alert('PO Number is required for PO Created.'); return; }
-    if (amountUsd && isNaN(parseFloat(amountUsd)))     { alert('Amount USD must be a valid number.'); return; }
+    const rawAmount = parseFloat(amount);
+    if (amount && isNaN(rawAmount)) { alert('Amount must be a valid number.'); return; }
     const member = activeTeamMembers.find(m => m.id === employeeId);
     if (!member) return;
+
+    setConverting(true);
+    let amountUsd = rawAmount || 0;
+    let originalAmount: number | undefined;
+    let originalCurrency: string | undefined;
+    let exchangeRate: number | undefined;
+    let exchangeRateDate: string | undefined;
+
+    if (rawAmount > 0 && currency !== 'USD') {
+      try {
+        const conv = await convertToUsd(rawAmount, currency);
+        amountUsd        = conv.usdAmount;
+        originalAmount   = rawAmount;
+        originalCurrency = currency;
+        exchangeRate     = conv.exchangeRate;
+        exchangeRateDate = conv.isFallback ? undefined : conv.exchangeRateDate;
+      } catch {
+        amountUsd        = rawAmount; // fallback: treat as USD
+        originalCurrency = currency;
+      }
+    } else if (rawAmount > 0) {
+      originalAmount   = rawAmount;
+      originalCurrency = 'USD';
+      exchangeRate     = 1;
+      exchangeRateDate = new Date().toISOString().slice(0, 10);
+    }
+
+    setConverting(false);
     onSave({
-      id:           `PR-${Date.now()}`,
+      id:              `PR-${Date.now()}`,
       employeeId,
-      employeeName: member.name,
-      poNumber:     poNumber.trim(),
-      supplier:     supplier.trim(),
-      amountUsd:    amountUsd ? parseFloat(amountUsd) : 0,
+      employeeName:    member.name,
+      poNumber:        poNumber.trim(),
+      supplier:        supplier.trim(),
+      amountUsd,
+      originalAmount,
+      originalCurrency,
+      exchangeRate,
+      exchangeRateDate,
       category,
       status,
-      notes:        notes.trim(),
+      notes:           notes.trim(),
       date,
     });
   };
@@ -1191,8 +1306,16 @@ function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
           <input className="input" value={supplier} onChange={e => setSupplier(e.target.value)} placeholder="e.g. Elektra Components GmbH" />
         </div>
         <div>
-          <div className="kpi-label">Amount USD</div>
-          <input className="input" type="number" min="0" step="0.01" value={amountUsd} onChange={e => setAmountUsd(e.target.value)} placeholder="e.g. 12400" />
+          <div className="kpi-label">Amount</div>
+          <div style={{ display:'flex', gap:6 }}>
+            <input className="input" style={{ flex:1, margin:0 }} type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} placeholder="e.g. 12400" />
+            <select className="input" style={{ margin:0, width:88 }} value={currency} onChange={e => setCurrency(e.target.value)}>
+              {SUPPORTED_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {currency !== 'USD' && amount && !isNaN(parseFloat(amount)) && (
+            <div className="form-note">Will be converted to USD at current rate</div>
+          )}
         </div>
         <div>
           <div className="kpi-label">Status</div>
@@ -1210,10 +1333,48 @@ function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-        <button className="save-button" style={{ marginTop: 0 }} onClick={save}>Save</button>
+        <button className="save-button" style={{ marginTop: 0 }} onClick={save} disabled={converting}>
+          {converting ? 'Converting…' : 'Save'}
+        </button>
         <button onClick={onCancel} style={{ background: 'rgba(255,255,255,.07)', border: '1px solid var(--color-border)', color: '#e8eef7', borderRadius: 12, padding: '11px 20px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}>Cancel</button>
       </div>
     </div>
+  );
+}
+
+// ─── Delete Confirmation Modal ─────────────────────────────────────────────
+
+function DeleteConfirmModal({ title, onConfirm, onCancel }: {
+  title:     string;
+  onConfirm: (reason: string) => void;
+  onCancel:  () => void;
+}) {
+  const [reason, setReason] = useState('');
+  return (
+    <>
+      <div className="panel-overlay" onClick={onCancel} />
+      <div style={{
+        position:'fixed', top:'50%', left:'50%', transform:'translate(-50%,-50%)',
+        background:'#0d192b', border:'1px solid rgba(239,68,68,.3)', borderRadius:20,
+        padding:'28px 28px', width:'min(440px,90vw)', zIndex:200, fontFamily:'inherit',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize:16, fontWeight:700, marginBottom:6 }}>Delete record?</div>
+        <div className="small" style={{ marginBottom:18 }}>{title}</div>
+        <div className="kpi-label" style={{ marginBottom:4 }}>Reason (optional)</div>
+        <input className="input" value={reason} onChange={e => setReason(e.target.value)}
+          placeholder="e.g. Duplicate, entered in error…" />
+        <div style={{ display:'flex', gap:10, marginTop:18 }}>
+          <button
+            onClick={() => onConfirm(reason)}
+            style={{ background:'rgba(239,68,68,.15)', border:'1px solid rgba(239,68,68,.4)', color:'var(--color-critical)', borderRadius:12, padding:'10px 20px', cursor:'pointer', fontFamily:'inherit', fontSize:14, fontWeight:700 }}>
+            Delete
+          </button>
+          <button onClick={onCancel} style={{ background:'rgba(255,255,255,.07)', border:'1px solid var(--color-border)', color:'#e8eef7', borderRadius:12, padding:'10px 20px', cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1603,13 +1764,14 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
   authUserEmail?: string;
   authUserId?: string;
 }) {
-  const [records,    setRecords]    = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
-  const [loading,    setLoading]    = useState(!DEMO_MODE);
-  const [selected,   setSelected]   = useState<ProcurementCategory | null>(null);
-  const [showForm,   setShowForm]   = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [editingId,  setEditingId]  = useState<string | null>(null);
-  const [saveErr,    setSaveErr]    = useState('');
+  const [records,      setRecords]      = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
+  const [loading,      setLoading]      = useState(!DEMO_MODE);
+  const [selected,     setSelected]     = useState<ProcurementCategory | null>(null);
+  const [showForm,     setShowForm]     = useState(false);
+  const [showImport,   setShowImport]   = useState(false);
+  const [editingId,    setEditingId]    = useState<string | null>(null);
+  const [saveErr,      setSaveErr]      = useState('');
+  const [deletingRecord, setDeletingRecord] = useState<ProcurementRecord | null>(null);
 
   useEffect(() => {
     if (DEMO_MODE) return;
@@ -1627,13 +1789,32 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
   const handleSave = async (record: ProcurementRecord) => {
     setSaveErr('');
     try {
-      if (!DEMO_MODE) await insertProcurementToDB(record);
-      setRecords(prev => [record, ...prev]);
+      const withOwner = { ...record, createdBy: authUserEmail };
+      if (!DEMO_MODE) await insertProcurementToDB(withOwner, authUserEmail);
+      setRecords(prev => [withOwner, ...prev]);
       setShowForm(false);
     } catch (err) {
       setSaveErr(err instanceof Error ? err.message : 'Failed to save record.');
     }
   };
+
+  const handleDelete = async (record: ProcurementRecord, reason: string) => {
+    try {
+      if (!DEMO_MODE) await softDeleteProcurementRecord(record.id, authUserEmail ?? '', reason);
+      setRecords(prev => prev.filter(r => r.id !== record.id));
+      setDeletingRecord(null);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete record.');
+    }
+  };
+
+  // Check if current user can delete a record
+  const canDelete = (record: ProcurementRecord): boolean =>
+    Boolean(authUserEmail) && (
+      record.createdBy  === authUserEmail ||
+      record.employeeId === authUserEmail ||
+      isAdmin(authUserEmail)
+    );
 
   const handleEdit = async (id: string, patch: Partial<ProcurementRecord>) => {
     try {
@@ -1717,6 +1898,13 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
   return (
     <>
       {selected && <ProcurementDrillDown category={selected} records={records} onClose={() => setSelected(null)} />}
+      {deletingRecord && (
+        <DeleteConfirmModal
+          title={`${deletingRecord.poNumber || 'PO'} — ${deletingRecord.supplier} — $${deletingRecord.amountUsd.toLocaleString()}`}
+          onConfirm={reason => handleDelete(deletingRecord, reason)}
+          onCancel={() => setDeletingRecord(null)}
+        />
+      )}
       {showImport && (
         <ProcurementImportPanel
           onImport={handleBulkImport}
@@ -1801,15 +1989,16 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
                   <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
                   <td><span className="rec-id">{r.poNumber || '—'}</span></td>
                   <td><b>{r.supplier}</b>{r.notes && <div className="small">{r.notes}</div>}</td>
-                  <td style={{ fontWeight: 700, color: r.amountUsd > 0 ? 'var(--color-completed)' : 'var(--color-muted)', whiteSpace: 'nowrap' }}>
-                    {r.amountUsd > 0 ? `$${r.amountUsd.toLocaleString()}` : '—'}
-                  </td>
+                  <td><MoneyCell record={r} /></td>
                   <td>{r.employeeName}</td>
                   <td>{r.date}</td>
                   <td><span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : r.status === 'In Progress' ? 'status-in-progress' : 'status-blocked'}`}>{r.status}</span></td>
-                  <td>
+                  <td style={{ display:'flex', gap:8, alignItems:'center' }}>
                     {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
                       <button onClick={() => setEditingId(r.id)} style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Edit</button>
+                    )}
+                    {canDelete(r) && editingId !== r.id && (
+                      <button onClick={() => setDeletingRecord(r)} style={{ background:'none', border:'none', color:'var(--color-critical)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Delete</button>
                     )}
                   </td>
                 </tr>
@@ -2434,50 +2623,75 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
 
 // ─── Activity Feed (derived from SupportLog) ───────────────────────────────
 
-function ActivityFeed({ timeFilter, supportLogs, authUserEmail, onUpdateLog }: {
-  timeFilter: TimeFilter;
-  supportLogs: SupportLog[];
+function ActivityFeed({ timeFilter, allActivities, supportLogs, authUserEmail, onUpdateLog }: {
+  timeFilter:    TimeFilter;
+  allActivities: UnifiedActivity[];
+  supportLogs:   SupportLog[];   // kept for edit functionality (SupportLogEditPanel needs full SupportLog)
   authUserEmail?: string;
   onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const logs = filterLogsByTimeFilter(supportLogs, timeFilter);
+  const { start, end } = getDateRangeForFilter(timeFilter);
+  end.setHours(23, 59, 59, 999);
+  const items = allActivities.filter(a => {
+    const d = new Date(a.date + 'T00:00:00');
+    return d >= start && d <= end;
+  });
+
+  const typeLabel: Record<string, string> = {
+    support: '🕐 Support', procurement: '📄 Procurement', operations: '📦 Operations',
+  };
+  const typeColor: Record<string, string> = {
+    support: 'var(--color-completed)', procurement: 'var(--color-warning)', operations: 'var(--color-accent)',
+  };
+
   return (
     <>
       <div className="page-header">
         <h2>Operations Activity Feed</h2>
-        <div className="small">Live contribution log · {getTimeFilterLabel(timeFilter)}</div>
+        <div className="small">All activity types · {getTimeFilterLabel(timeFilter)}</div>
       </div>
-      {logs.length === 0 ? (
+      {items.length === 0 ? (
         <div className="card"><div className="panel-empty"><div className="panel-empty-icon">📋</div><div>No activities logged for this period</div></div></div>
       ) : (
         <div className="timeline">
-          {logs.map(l => (
-            <div key={l.id} className="event">
-              <div><span className="pill">{l.date}</span></div>
+          {items.map(a => {
+            const l = a.type === 'support' ? supportLogs.find(s => s.id === a.id) : null;
+            return (
+            <div key={a.id} className="event">
+              <div><span className="pill">{a.date}</span></div>
               <div style={{ flex: 1 }}>
-                {editingId === l.id ? (
+                {l && editingId === a.id ? (
                   <SupportLogEditPanel
                     log={l}
                     onSave={patch => {
-                      onUpdateLog?.(l.id, patch);
+                      onUpdateLog?.(a.id, patch);
                       setEditingId(null);
                     }}
                     onCancel={() => setEditingId(null)}
                   />
                 ) : (
                   <>
-                    <span className="pill">{l.department}</span>
-                    <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{l.title}</h3>
-                    {l.notes && <div className="small">{l.notes}</div>}
+                    <span className="pill" style={{ fontSize:10, color: typeColor[a.type] }}>{typeLabel[a.type]}</span>
+                    {' '}
+                    <span className="pill">{a.category}</span>
+                    <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{a.title}</h3>
+                    {a.amountUsd != null && a.amountUsd > 0 && (
+                      <span style={{ fontSize:12, color:'var(--color-completed)', fontWeight:700 }}>
+                        ${a.amountUsd.toLocaleString()}
+                        {a.originalCurrency && a.originalCurrency !== 'USD' && (
+                          <span style={{ color:'var(--color-muted)', fontWeight:400 }}> ({currencySymbol(a.originalCurrency)}{a.originalAmount?.toLocaleString()} {a.originalCurrency})</span>
+                        )}
+                      </span>
+                    )}
+                    {a.quantity != null && <span style={{ fontSize:12, color:'var(--color-accent)', fontWeight:700 }}> {a.quantity} units</span>}
+                    {a.notes && <div className="small">{a.notes}</div>}
                     <div className="event-meta">
-                      <span className="owner-tag">↳ {l.employeeName}</span>
-                      <span className="status-badge status-completed">{l.hours}h</span>
-                      {authUserEmail && l.employeeId === authUserEmail && (
-                        <button
-                          onClick={() => setEditingId(l.id)}
-                          style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
-                        >
+                      <span className="owner-tag">↳ {a.employeeName}</span>
+                      {a.hours != null && <span className="status-badge status-completed">{a.hours}h</span>}
+                      {l && authUserEmail && l.employeeId === authUserEmail && (
+                        <button onClick={() => setEditingId(a.id)}
+                          style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>
                           Edit
                         </button>
                       )}
@@ -2486,7 +2700,8 @@ function ActivityFeed({ timeFilter, supportLogs, authUserEmail, onUpdateLog }: {
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </>
@@ -2621,6 +2836,8 @@ export default function App() {
   // ── Production Mode state ────────────────────────────────────────────────
   const [dbLogs,         setDbLogs]         = useState<SupportLog[]>([]);
   const [dbTeamMembers,  setDbTeamMembers]   = useState<TeamMember[]>([]);
+  const [dbProcRecords,  setDbProcRecords]   = useState<ProcurementRecord[]>([]);
+  const [dbOpsRecords,   setDbOpsRecords]    = useState<OperationsRecord[]>([]);
   const [authUser,       setAuthUser]        = useState<{ id: string; email: string } | null>(null);
   const [dbLoading,      setDbLoading]       = useState(!DEMO_MODE);
 
@@ -2636,19 +2853,20 @@ export default function App() {
         if (user) {
           setAuthUser({ id: user.id, email: user.email ?? '' });
           try {
-            // Fetch logs and team members in parallel
-            const [logs, members] = await Promise.all([
+            // Fetch all data sources in parallel for the unified activity stream
+            const tf = currentTimeFilter();
+            const [logs, members, proc, ops] = await Promise.all([
               fetchLogsFromDB(),
               fetchTeamMembersFromDB(),
+              fetchProcurementFromDB(tf).catch(() => [] as ProcurementRecord[]),
+              fetchOperationsFromDB(tf).catch(() => [] as OperationsRecord[]),
             ]);
             setDbLogs(logs);
             if (members.length > 0) setDbTeamMembers(members);
+            setDbProcRecords(proc);
+            setDbOpsRecords(ops);
           } catch (fetchErr) {
-            // fetchLogsFromDB now throws on error — catch here so a failed
-            // fetch does not crash the bootstrap or leave dbLogs stale-empty.
             console.error('Bootstrap fetch failed:', fetchErr);
-            // dbLogs stays as [] (initial state) — the dashboard shows empty states
-            // rather than crashing. The user can refresh to retry.
           }
         }
         setDbLoading(false);
@@ -2683,11 +2901,16 @@ export default function App() {
     : dbLogs;
 
   // ── Active team members ───────────────────────────────────────────────────
-  // Demo  → hardcoded mock roster
-  // Prod  → live Supabase team_members, with mock as fallback if fetch failed
   const activeTeamMembers: TeamMember[] = DEMO_MODE
     ? teamMembers
     : (dbTeamMembers.length > 0 ? dbTeamMembers : teamMembers);
+
+  // ── Unified activity stream ───────────────────────────────────────────────
+  // Merges support_logs + procurement_records + operations_records.
+  // Used by Activity Feed, Team Last Updates, and Team Contributions.
+  const procForStream: ProcurementRecord[]  = DEMO_MODE ? mockProcurementRecords : dbProcRecords;
+  const opsForStream:  OperationsRecord[]   = DEMO_MODE ? mockOperationsRecords  : dbOpsRecords;
+  const allActivities = buildUnifiedActivities(supportLogs, procForStream, opsForStream);
 
   // ── Add log ───────────────────────────────────────────────────────────────
   const addLog = async (log: SupportLog) => {
@@ -2746,7 +2969,7 @@ export default function App() {
   if (page === 'Operations')                   content = <OperationsPage  timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
-  if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} supportLogs={supportLogs} authUserEmail={authUser?.email} onUpdateLog={updateLog} />;
+  if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} allActivities={allActivities} supportLogs={supportLogs} authUserEmail={authUser?.email} onUpdateLog={updateLog} />;
   if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} />;
 
   return (
