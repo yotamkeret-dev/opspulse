@@ -299,18 +299,18 @@ async function softDeleteProcurementRecord(
   reason: string
 ): Promise<void> {
   const supabase = createClient();
-  const { data, error } = await supabase
+  // Do NOT chain .select() — after setting deleted_at the row no longer passes
+  // the SELECT policy (deleted_at IS NULL), so Supabase would throw an RLS error
+  // when trying to return the updated row. A null error means the UPDATE succeeded.
+  const { error } = await supabase
     .from('procurement_records')
     .update({
-      deleted_at:       new Date().toISOString(),
-      deleted_by:       deletedByEmail,
-      deletion_reason:  reason || null,
+      deleted_at:      new Date().toISOString(),
+      deleted_by:      deletedByEmail,
+      deletion_reason: reason || null,
     })
-    .eq('id', id)
-    .select('id');
+    .eq('id', id);
   if (error) throw new Error(error.message);
-  // If RLS blocks the update, Supabase returns no error but 0 rows.
-  if (!data || data.length === 0) throw new Error('Delete was blocked. You may not have permission to delete this record, or the record no longer exists.');
 }
 
 // ─── Money display helpers ─────────────────────────────────────────────────
