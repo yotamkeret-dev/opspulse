@@ -298,19 +298,45 @@ async function softDeleteProcurementRecord(
   deletedByEmail: string,
   reason: string
 ): Promise<void> {
+  // The Supabase JS client sends no explicit Prefer header for .update(), so
+  // PostgREST defaults to return=representation (RETURNING * in the SQL).
+  // After setting deleted_at, the new row fails the SELECT policy
+  // (deleted_at IS NULL), and PostgreSQL raises "new row violates row-level
+  // security policy" during the RETURNING evaluation — even though the UPDATE
+  // itself is allowed.
+  //
+  // Fix: use raw fetch with Prefer: return=minimal.  This tells PostgREST to
+  // emit the UPDATE without a RETURNING clause, so the SELECT policy is never
+  // evaluated against the new row and the soft delete succeeds.
   const supabase = createClient();
-  // Do NOT chain .select() — after setting deleted_at the row no longer passes
-  // the SELECT policy (deleted_at IS NULL), so Supabase would throw an RLS error
-  // when trying to return the updated row. A null error means the UPDATE succeeded.
-  const { error } = await supabase
-    .from('procurement_records')
-    .update({
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not authenticated');
+
+  const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/procurement_records?id=eq.${encodeURIComponent(id)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type':  'application/json',
+      'apikey':        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      'Authorization': `Bearer ${session.access_token}`,
+      'Prefer':        'return=minimal',
+    },
+    body: JSON.stringify({
       deleted_at:      new Date().toISOString(),
       deleted_by:      deletedByEmail,
       deletion_reason: reason || null,
-    })
-    .eq('id', id);
-  if (error) throw new Error(error.message);
+    }),
+  });
+
+  if (!response.ok) {
+    let message = `Delete failed (${response.status})`;
+    try {
+      const err = await response.json();
+      message = err.message ?? err.hint ?? message;
+    } catch { /* non-JSON body */ }
+    console.error('softDeleteProcurementRecord error:', message);
+    throw new Error(message);
+  }
 }
 
 // ─── Money display helpers ─────────────────────────────────────────────────
