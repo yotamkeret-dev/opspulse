@@ -14,6 +14,12 @@ export const runtime = 'nodejs'; // never run on edge — pdf-parse requires Nod
  */
 export async function POST(request: NextRequest) {
   try {
+    if (typeof globalThis.DOMMatrix === 'undefined') {
+  class DOMMatrixPolyfill {
+    constructor() {}
+  }
+  ;(globalThis as any).DOMMatrix = DOMMatrixPolyfill
+}
     const formData = await request.formData();
     const file = formData.get('file');
     if (!file || typeof file === 'string') {
