@@ -30,14 +30,16 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes);
     // Dynamic import keeps pdfjs out of module evaluation and avoids canvas polyfill errors
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const pdfParse = require('pdf-parse');
-    const parsed = await pdfParse(buffer);
+   const { PDFParse } = require('pdf-parse');
 
+const parser = new PDFParse({ data: buffer });
+const parsed = await parser.getText();
+await parser.destroy();
     const rows = extractOraclePORows(parsed.text);
 
     return NextResponse.json({
       rows,
-      pageCount: parsed.numpages,
+     pageCount: parsed.total ?? 0,
       charCount: parsed.text.length,
     });
   } catch (err) {
@@ -128,4 +130,4 @@ function extractLineItems(text: string): Array<Record<string, string>> {
   }
 
   return items;
-}
+  }
