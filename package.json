@@ -14,7 +14,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "next": "latest",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.1",
     "react": "latest",
     "react-dom": "latest",
     "recharts": "latest",
