@@ -167,9 +167,8 @@ export const PROCUREMENT_CATEGORIES = [
 export type ProcurementCategory = typeof PROCUREMENT_CATEGORIES[number];
 
 export const PROCUREMENT_STATUSES = [
-  'Open',
-  'In Progress',
-  'Completed',
+  'PO Issued',
+'PO Arrived',
 ] as const;
 export type ProcurementStatus = typeof PROCUREMENT_STATUSES[number];
 
