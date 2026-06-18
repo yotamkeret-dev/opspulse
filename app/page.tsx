@@ -1235,23 +1235,61 @@ function ProcurementDrillDown({ category, records, onClose }: {
 
 // ─── Procurement Entry Form ────────────────────────────────────────────────
 
-function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
+function ProcurementEntryForm({
+  onSave,
+  onCancel,
+  activeTeamMembers,
+  initialRecord
+}: {
   onSave: (r: ProcurementRecord) => void;
   onCancel: () => void;
   activeTeamMembers: TeamMember[];
+  initialRecord?: ProcurementRecord;
 }) {
-  const [employeeId, setEmployeeId] = useState('');
-  const [category,   setCategory]   = useState<ProcurementCategory>(PROCUREMENT_CATEGORIES[0]);
-  const [poNumber,   setPoNumber]   = useState('');
-  const [supplier,   setSupplier]   = useState('');
-  const [amount,      setAmount]      = useState('');
-  const [currency,    setCurrency]    = useState('USD');
-  const [status,      setStatus]      = useState<ProcurementRecord['status']>(PROCUREMENT_STATUSES[0]);
-  const [notes,       setNotes]       = useState('');
-  const [date,        setDate]        = useState(new Date().toISOString().slice(0, 10));
-  const [converting,  setConverting]  = useState(false);
+  const [employeeId, setEmployeeId] = useState(initialRecord?.employeeId ?? '');
 
-  const save = async () => {
+const [category, setCategory] = useState<ProcurementCategory>(
+  initialRecord?.category ?? PROCUREMENT_CATEGORIES[0]
+);
+
+const [poNumber, setPoNumber] = useState(initialRecord?.poNumber ?? '');
+
+const [supplier, setSupplier] = useState(initialRecord?.supplier ?? '');
+const [amount, setAmount] = useState(
+  initialRecord?.amountUsd?.toString() ?? ''
+);
+
+const [currency, setCurrency] = useState('USD');
+
+const [status, setStatus] = useState<ProcurementRecord['status']>(
+  initialRecord?.status ?? PROCUREMENT_STATUSES[0]
+);
+
+const [notes, setNotes] = useState(
+  initialRecord?.notes ?? ''
+);
+
+const [date, setDate] = useState(
+  initialRecord?.date ?? new Date().toISOString().slice(0, 10)
+);
+  const [converting,  setConverting]  = useState(false);
+useEffect(() => {
+  console.log('FORM initialRecord:', initialRecord);
+
+  if (!initialRecord) return;
+    setEmployeeId(initialRecord.employeeId ?? '');
+
+  setCategory(initialRecord.category ?? PROCUREMENT_CATEGORIES[0]);
+  setPoNumber(initialRecord.poNumber ?? '');
+  setSupplier(initialRecord.supplier ?? '');
+  setAmount((initialRecord.amountUsd ?? '').toString());
+  setCurrency('USD');
+  setStatus(initialRecord.status ?? PROCUREMENT_STATUSES[0]);
+  setNotes(initialRecord.notes ?? '');
+  setDate(initialRecord.date ?? new Date().toISOString().slice(0, 10));
+}, [initialRecord]);
+
+const save = async () => {
     if (!employeeId)              { alert('Please select an employee.'); return; }
     if (!supplier.trim())         { alert('Supplier is required.'); return; }
     if (category === 'PO Created' && !poNumber.trim()) { alert('PO Number is required for PO Created.'); return; }
@@ -1378,7 +1416,6 @@ exchangeRateDate =
     </div>
   );
 }
-
 // ─── Delete Confirmation Modal ─────────────────────────────────────────────
 
 function DeleteConfirmModal({ title, onConfirm, onCancel }: {
@@ -2100,11 +2137,13 @@ activity_date:
                   <tr key={`edit-${r.id}`}>
                     <td colSpan={8} style={{ padding: 0 }}>
                       <div style={{ padding: '0 10px 10px' }}>
-                        <ProcurementEntryForm
-                          onSave={rec => handleEdit(r.id, rec)}
-                          onCancel={() => setEditingId(null)}
-                          activeTeamMembers={activeTeamMembers}
-                        />
+ <ProcurementEntryForm
+  key={`edit-form-${r.id}`}
+  initialRecord={r}
+  onSave={rec => handleEdit(r.id, rec)}
+  onCancel={() => setEditingId(null)}
+  activeTeamMembers={activeTeamMembers}
+/>
                       </div>
                     </td>
                   </tr>
