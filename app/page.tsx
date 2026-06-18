@@ -106,6 +106,7 @@ async function insertLogToDB(
   // Chain .select('id') so we can verify the row was actually committed.
   // Supabase returns { data: null, error: null } when an RLS INSERT policy
   // silently blocks the write — without .select() that looks like success.
+  console.log('INSERTING LOG:', log);
   const { data, error } = await supabase
     .from('support_logs')
     .insert({
@@ -169,8 +170,14 @@ async function fetchProcurementFromDB(tf: TimeFilter): Promise<ProcurementRecord
     .gte('activity_date', start.toISOString().slice(0, 10))
     .lte('activity_date', end.toISOString().slice(0, 10))
     .order('activity_date', { ascending: false });
-  if (error) { console.error('fetchProcurement:', error.message); return []; }
-  return (data ?? []).map(rowToProcurementRecord);
+  if (error) {
+  console.error('fetchProcurement:', error.message);
+  return [];
+}
+
+console.log('PROCUREMENT FROM DB:', data);
+
+return (data ?? []).map(rowToProcurementRecord);
 }
 
 async function insertProcurementToDB(record: ProcurementRecord, createdByEmail?: string): Promise<void> {
@@ -185,13 +192,18 @@ async function insertProcurementToDB(record: ProcurementRecord, createdByEmail?:
     category:            record.category,
     status:              record.status,
     notes:               record.notes,
-    activity_date:       record.date,
+    activity_date:
+  record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
+    ? record.date
+    : new Date(record.date).toISOString().slice(0, 10),
     // Multi-currency fields
     original_amount:     record.originalAmount   ?? record.amountUsd ?? null,
     original_currency:   record.originalCurrency ?? 'USD',
     exchange_rate:       record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
-    exchange_rate_date:  record.exchangeRateDate  ?? null,
-    // Ownership
+exchange_rate_date:
+  record.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(record.exchangeRateDate)
+    ? record.exchangeRateDate
+    : new Date().toISOString().slice(0, 10),    // Ownership
     created_by:          createdByEmail ?? null,
   });
   if (error) throw new Error(error.message);
@@ -231,7 +243,7 @@ async function insertOperationsToDB(record: OperationsRecord): Promise<void> {
     id:            record.id,
     employee_id:   record.employeeId,
     employee_name: record.employeeName,
-    activity_date: record.date,
+   activity_date: record.date,
     category:      record.category,
     quantity:      record.quantity,
     notes:         record.notes,
@@ -270,7 +282,10 @@ async function updateProcurementInDB(id: string, patch: Partial<ProcurementRecor
       category:      patch.category,
       status:        patch.status,
       notes:         patch.notes,
-      activity_date: patch.date,
+      activity_date:
+  patch.date && /^\d{4}-\d{2}-\d{2}$/.test(patch.date)
+    ? patch.date
+    : new Date().toISOString().slice(0, 10),
     })
     .eq('id', id);
   if (error) throw new Error(error.message);
@@ -352,7 +367,7 @@ function MoneyCell({ record }: { record: { amountUsd?: number; originalAmount?: 
 }
 
 const pages = [
-  'Executive Dashboard', 'Team Contributions', 'Logistics', 'Procurement', 'Operations',
+  'Executive Dashboard', 'Team Contributions','Procurement', 'Operations',
   'Cross Functional Support', 'Weekly Highlights', 'Activity Feed', 'Add Weekly Activity',
 ];
 
@@ -1259,11 +1274,19 @@ function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
         originalAmount   = rawAmount;
         originalCurrency = currency;
         exchangeRate     = conv.exchangeRate;
-        exchangeRateDate = conv.isFallback ? undefined : conv.exchangeRateDate;
-      } catch {
-        amountUsd        = rawAmount; // fallback: treat as USD
-        originalCurrency = currency;
-      }
+exchangeRateDate =
+  conv.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(conv.exchangeRateDate)
+    ? conv.exchangeRateDate
+    : new Date().toISOString().slice(0, 10);
+
+
+} catch {
+  amountUsd = rawAmount; // fallback: treat as USD
+  originalAmount = rawAmount;
+  originalCurrency = currency;
+  exchangeRate = 1;
+  exchangeRateDate = new Date().toISOString().slice(0, 10);
+}
     } else if (rawAmount > 0) {
       originalAmount   = rawAmount;
       originalCurrency = 'USD';
@@ -1286,7 +1309,9 @@ function ProcurementEntryForm({ onSave, onCancel, activeTeamMembers }: {
       category,
       status,
       notes:           notes.trim(),
-      date,
+      date: date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+  ? date
+  : new Date().toISOString().slice(0, 10),
     });
   };
 
@@ -1443,6 +1468,7 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
     setStep('parsing');
     try {
       const parsed = await parseFile(file);
+
       setRawRows(parsed.rows);
       setSheets(parsed.sheets ?? []);
       setSourceType(parsed.sourceType);
@@ -1850,22 +1876,56 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
       const finalEmployeeId   = m.data.employeeId   ?? authUserEmail ?? '';
       const finalEmployeeName = m.data.employeeName ?? defaultEmployee?.name ?? 'Operations Team';
       const needsReview       = m.status === 'needs_review';
+const rawRow = ((m.rawImport as any)?.extractedRows?.[i] ?? {}) as Record<string, any>;
 
+const rawPoDate =
+  rawRow.PO_DATE ??
+  rawRow.po_date ??
+  rawRow.date ??
+  rawRow.DATE ??
+  m.data.date;
+
+const normalizedDate =
+  typeof rawPoDate === 'string' && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(rawPoDate)
+    ? (() => {
+        const [dd, mm, yyyy] = rawPoDate.split('/');
+        return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+      })()
+    : m.data.date ?? new Date().toISOString().slice(0, 10);
+    const rawAmount = m.data.originalAmount ?? m.data.amountUsd ?? 0;
+const rawCurrency = String(rawRow.CURRENCY ?? rawRow.currency ?? m.data.originalCurrency ?? 'USD').toUpperCase().trim();console.log('DATA', m.data);
+
+
+let convertedAmountUsd = rawAmount;
+
+let convertedRate: number | undefined =
+  rawCurrency === 'USD' ? 1 : undefined;
+
+let convertedRateDate: string | undefined =
+  rawCurrency === 'USD'
+    ? new Date().toISOString().slice(0, 10)
+    : undefined;
+if (rawAmount > 0 && rawCurrency !== 'USD') {
+  const conv = await convertToUsd(rawAmount, rawCurrency);
+  convertedAmountUsd = conv.usdAmount;
+  convertedRate = conv.exchangeRate;
+  convertedRateDate = conv.exchangeRateDate;
+}
       const record: ProcurementRecord = {
         id:               m.id,
         employeeId:       finalEmployeeId,
         employeeName:     finalEmployeeName,
         poNumber:         m.data.poNumber  ?? '',
         supplier:         m.data.supplier  ?? '',
-        amountUsd:        m.data.amountUsd ?? 0,
-        category:         m.data.category  ?? 'PO Created',
+amountUsd: convertedAmountUsd,       
+ category:         m.data.category  ?? 'PO Created',
         status:           m.data.status    ?? 'Open',
         notes:            (needsReview ? '[NEEDS REVIEW] ' : '') + (m.data.notes ?? ''),
-        date:             m.data.date ?? new Date().toISOString().slice(0, 10),
-        originalAmount:   m.data.originalAmount   ?? m.data.amountUsd ?? undefined,
-        originalCurrency: m.data.originalCurrency ?? 'USD',
-        exchangeRate:     m.data.exchangeRate      ?? undefined,
-        exchangeRateDate: m.data.exchangeRateDate  ?? undefined,
+date: normalizedDate,
+        originalAmount: rawAmount,
+originalCurrency: rawCurrency,
+exchangeRate: convertedRate,
+exchangeRateDate: convertedRateDate,
         createdBy:        authUserEmail ?? undefined,
       };
 
@@ -1885,12 +1945,17 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
             category:           record.category,
             status:             record.status,
             notes:              record.notes,
-            activity_date:      record.date,
-            raw_import:         rawImport,
+activity_date:
+  record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
+    ? record.date
+    : new Date().toISOString().slice(0, 10),            raw_import:         rawImport,
             original_amount:    record.originalAmount   ?? record.amountUsd ?? null,
             original_currency:  record.originalCurrency ?? 'USD',
             exchange_rate:      record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
-            exchange_rate_date: record.exchangeRateDate  ?? null,
+            exchange_rate_date:
+  record.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(record.exchangeRateDate)
+    ? record.exchangeRateDate
+    : new Date().toISOString().slice(0, 10),
             created_by:         record.createdBy         ?? null,
           })
           .select('id');
@@ -1908,11 +1973,13 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
             department:   'Operations',
             category:     'Procurement',
             title:        summaryTitle,
-            hours:        0,
+           hours: 0.1,
             date:         record.date,
             week:         getWeekTag(record.date),
             notes:        `Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
           };
+          console.log('IMPORT LOG ENTRY:', logEntry);
+          console.log('IMPORT RECORD:', record);
           await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
         }
       }
@@ -2758,7 +2825,9 @@ function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: Suppor
       category,
       title,
       hours: parseFloat(hours),
-      date,
+      date: date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+  ? date
+  : new Date().toISOString().slice(0, 10),
       week: getWeekTag(date),
       notes,
     };
@@ -2993,11 +3062,10 @@ export default function App() {
 
   // Sub-pages still use mock timeRangeData keyed by legacy Period
   const period = timeFilterToPeriod(timeFilter);
-  const data   = timeRangeData[period];
-
+const data = timeRangeData[period];
   let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} allActivities={allActivities} />;
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
-  if (page === 'Logistics')                    content = <MetricPage title="Logistics" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={data.logistics} />;
+  
   if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} authUserId={authUser?.id} onRecordAdded={r => setDbProcRecords(prev => [r, ...prev.filter(x => x.id !== r.id)])} onRecordDeleted={id => setDbProcRecords(prev => prev.filter(r => r.id !== id))} />;
   if (page === 'Operations')                   content = <OperationsPage  timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} onRecordAdded={r => setDbOpsRecords(prev => [r, ...prev.filter(x => x.id !== r.id)])} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;

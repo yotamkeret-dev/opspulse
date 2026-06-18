@@ -1,9 +1,9 @@
 'use client';
 import { useState } from 'react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { activityByCategory, deployments, feed, highlights, kpis, logistics, procurement, supportByDept, trend } from './data/mock';
+import { activityByCategory, deployments, feed, highlights, kpis, procurement, supportByDept, trend } from './data/mock';
 
-const pages = ['Executive Dashboard', 'Logistics', 'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed'];
+const pages = ['Executive Dashboard',  'Procurement', 'Deployments & Installations', 'Cross Functional Support', 'Weekly Highlights', 'Activity Feed'];
 
 function KPIGrid({ items }: { items: typeof kpis }) {
   return <div className="grid kpis">{items.map((item) => <div className="card" key={item.label}><div className="kpi-label">{item.label}</div><div className="kpi-value">{item.value}</div><div className="kpi-note">{item.note}</div></div>)}</div>;
@@ -36,7 +36,7 @@ function ActivityFeed() {
 export default function App() {
   const [page, setPage] = useState('Executive Dashboard');
   let content = <Executive />;
-  if (page === 'Logistics') content = <MetricPage title="Logistics Command Center" intro="Shipment readiness, customs visibility, BAZ status and spare part movement." rows={logistics} />;
+  
   if (page === 'Procurement') content = <MetricPage title="Procurement Impact" intro="Purchase orders, emergency requests, supplier payments and cost savings." rows={procurement} />;
   if (page === 'Deployments & Installations') content = <MetricPage title="Deployments & Installations" intro="Installations, maintenance, customer kickoffs and training activity from Salesforce and team inputs." rows={deployments} />;
   if (page === 'Cross Functional Support') content = <Support />;

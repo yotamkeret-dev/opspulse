@@ -56,7 +56,7 @@ function extractOraclePORows(text: string): Record<string, string | null>[] {
   const boundaries = /(?=(?:PURCHASE\s+ORDER|P\.?O\.?\s*(?:NUMBER|NO\b|#)))/gi;
   const sections = text.split(boundaries).filter(s => s.trim().length > 20);
 
-  const results = sections.map(extractSinglePO).filter(r => Object.keys(r).length > 2);
+const results = [extractSinglePO(text)].filter(r => Object.keys(r).length > 2);
 
   // If nothing useful was found, return the whole text as one raw section
   if (results.length === 0) {
@@ -68,6 +68,7 @@ function extractOraclePORows(text: string): Record<string, string | null>[] {
 
 function extractSinglePO(text: string): Record<string, string | null> {
   const row: Record<string, string | null> = {};
+
 
   // Key-value pairs — Oracle PO common field patterns
   const kvPatterns: [string, RegExp][] = [
@@ -88,7 +89,26 @@ function extractSinglePO(text: string): Record<string, string | null> {
     const m = text.match(pattern);
     if (m?.[1]) row[key] = m[1].trim();
   }
+// NetSuite PO fallback
+const poMatch = text.match(
+  /PURCHASE\s+ORDER[\s\S]{0,100}?([A-Z0-9\-]{4,})/i
+);
 
+if (poMatch?.[1]) {
+  row['PO_NUMBER'] = poMatch[1].trim();
+}
+
+// NetSuite Total fallback
+const totalMatch = text.match(
+  /(?:^|\n)\s*Total\s*[^0-9]{0,20}([0-9][0-9,]*(?:\.[0-9]{2})?)/i
+);
+
+if (totalMatch?.[1]) {
+  row['TOTAL'] = totalMatch[1].replace(/,/g, '');
+}
+// Currency fallback
+const netsuiteCurrency = text.match(/\bCurrency\s*[:\-]\s*([A-Z]{3})\b/i);
+if (netsuiteCurrency?.[1]) row['CURRENCY'] = netsuiteCurrency[1].trim().toUpperCase();
   // Extract line items from table-like structure
   const lineItems = extractLineItems(text);
   if (lineItems.length > 0) {
@@ -103,7 +123,6 @@ function extractSinglePO(text: string): Record<string, string | null> {
       if (sum > 0) row['TOTAL'] = sum.toFixed(2);
     }
   }
-
   return row;
 }
 

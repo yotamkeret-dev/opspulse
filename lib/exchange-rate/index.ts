@@ -40,7 +40,7 @@ export const openErApiProvider: ExchangeRateProvider = {
     // json.rates[ILS] = how many ILS per 1 USD, so 1 ILS = 1/rate USD
     return {
       rate:       parseFloat((1 / rateToUsd).toFixed(8)),
-      date:       (json.time_last_update_utc as string).slice(0, 10),
+      date: today(),
       provider:   this.name,
       isFallback: false,
     };
@@ -127,7 +127,10 @@ export async function convertToUsd(
   return {
     usdAmount,
     exchangeRate:     result.rate,
-    exchangeRateDate: result.date,
+    exchangeRateDate:
+  /^\d{4}-\d{2}-\d{2}$/.test(result.date)
+    ? result.date
+    : today(),
     isFallback:       result.isFallback,
   };
 }
