@@ -230,7 +230,8 @@ async function fetchOperationsFromDB(tf: TimeFilter): Promise<OperationsRecord[]
   const { data, error } = await supabase
     .from('operations_records')
     .select('*')
-    .gte('activity_date', start.toISOString().slice(0, 10))
+.is('deleted_at', null)
+.gte('activity_date', start.toISOString().slice(0, 10))
     .lte('activity_date', end.toISOString().slice(0, 10))
     .order('activity_date', { ascending: false });
   if (error) { console.error('fetchOperations:', error.message); return []; }
@@ -328,10 +329,12 @@ async function softDeleteOperationsRecord(
 ): Promise<void> {
   const supabase = createClient();
 
-  const { error } = await supabase
-    .from('operations_records')
-    .delete()
-    .eq('id', id);
+ const { error } = await supabase
+  .from('operations_records')
+  .update({
+    deleted_at: new Date().toISOString()
+  })
+  .eq('id', id);
 
   if (error) throw new Error(error.message);
 }
