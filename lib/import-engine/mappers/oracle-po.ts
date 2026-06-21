@@ -119,7 +119,7 @@ export function mapOraclePORow(
 
   // Apply defaults for missing optional fields
   if (!data.category)  data.category  = 'PO Created';
-  if (!data.status)    data.status    = 'Open';
+  if (!data.status) data.status = 'PO Issued';
   if (!data.notes)     data.notes     = '';
   if (!data.amountUsd) data.amountUsd = 0;
   if (!data.date) {
