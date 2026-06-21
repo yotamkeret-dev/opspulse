@@ -2528,7 +2528,7 @@ onClick={() => handleDelete(r.id)}    style={{
       marginLeft: 8
     }}
   >
-   Delete TEST
+   Delete 
   </button>
 )}
                     </td>
