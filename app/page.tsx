@@ -2122,8 +2122,7 @@ activity_date:
                   <td><MoneyCell record={r} /></td>
                   <td>{r.employeeName}</td>
                   <td>{r.date}</td>
-                  <td><span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : r.status === 'In Progress' ? 'status-in-progress' : 'status-blocked'}`}>{r.status}</span></td>
-                  <td style={{ display:'flex', gap:8, alignItems:'center' }}>
+<td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>                  <td style={{ display:'flex', gap:8, alignItems:'center' }}>
                     {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
                       <button onClick={() => setEditingId(r.id)} style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Edit</button>
                     )}
