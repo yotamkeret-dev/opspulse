@@ -2374,7 +2374,7 @@ function OperationsPage({ timeFilter, activeTeamMembers, authUserEmail, onRecord
   const [showForm,  setShowForm]  = useState(false);
   const [saveErr,   setSaveErr]   = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
-
+const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(null);
   useEffect(() => {
     const { start, end } = getDateRangeForFilter(timeFilter);
     end.setHours(23, 59, 59, 999);
@@ -2476,8 +2476,39 @@ function OperationsPage({ timeFilter, activeTeamMembers, authUserEmail, onRecord
                     <td><span className="small">{r.notes || '—'}</span></td>
                     <td>
                       {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
-                        <button onClick={() => setEditingId(r.id)} style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Edit</button>
+  <button
+    onClick={() => setEditingId(r.id)}
+    style={{
+      background: 'none',
+      border: 'none',
+      color: 'var(--color-accent)',
+      fontSize: 11,
+      fontWeight: 700,
+      cursor: 'pointer',
+      padding: 0
+    }}
+  >
+    Edit
+  </button>
+)}
                       )}
+                      {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
+  <button
+    onClick={() => setDeletingRecord(r)}
+    style={{
+      background: 'none',
+      border: 'none',
+      color: 'var(--color-danger)',
+      fontSize: 11,
+      fontWeight: 700,
+      cursor: 'pointer',
+      padding: 0,
+      marginLeft: 8
+    }}
+  >
+    Delete
+  </button>
+)}
                     </td>
                   </tr>
                   {editingId === r.id && (
