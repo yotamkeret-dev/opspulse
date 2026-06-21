@@ -2491,7 +2491,6 @@ const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(nu
     Edit
   </button>
 )}
-                      )}
                       {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
   <button
     onClick={() => setDeletingRecord(r)}
