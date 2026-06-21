@@ -1218,7 +1218,7 @@ function ProcurementDrillDown({ category, records, onClose }: {
                     <td>{r.employeeName}</td>
                     <td><span className="small">{r.date}</span></td>
                     <td>
-                      <span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : r.status === 'In Progress' ? 'status-in-progress' : 'status-blocked'}`}>
+                      <span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>
                         {r.status}
                       </span>
                     </td>
