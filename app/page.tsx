@@ -323,7 +323,18 @@ async function softDeleteProcurementRecord(
   if (error) throw new Error(error.message);
   if (!data) throw new Error('Delete failed: no confirmation returned from server.');
 }
+async function softDeleteOperationsRecord(
+  id: string
+): Promise<void> {
+  const supabase = createClient();
 
+  const { error } = await supabase
+    .from('operations_records')
+    .delete()
+    .eq('id', id);
+
+  if (error) throw new Error(error.message);
+}
 // ─── Money display helpers ─────────────────────────────────────────────────
 
 interface MoneyDisplay {
@@ -2411,9 +2422,19 @@ const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(nu
       alert(err instanceof Error ? err.message : 'Failed to update record.');
     }
   };
-
+const handleDelete = async (id: string) => {
+  alert('delete clicked');
+  if (!confirm('Delete this operations record?')) return;
+  try {
+   if (!DEMO_MODE) await softDeleteOperationsRecord(id);
+    setRecords(prev => prev.filter(r => r.id !== id));
+  } catch (err) {
+    alert(err instanceof Error ? err.message : 'Failed to delete record.');
+  }
+};
   return (
     <>
+    
       {selected && <OperationsDrillDown category={selected} records={records} onClose={() => setSelected(null)} />}
 
       <div className="page-header">
@@ -2493,8 +2514,7 @@ const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(nu
 )}
                       {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
   <button
-    onClick={() => setDeletingRecord(r)}
-    style={{
+onClick={() => handleDelete(r.id)}    style={{
       background: 'none',
       border: 'none',
       color: 'var(--color-danger)',
@@ -2505,7 +2525,7 @@ const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(nu
       marginLeft: 8
     }}
   >
-    Delete
+   Delete TEST
   </button>
 )}
                     </td>
