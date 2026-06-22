@@ -69,6 +69,7 @@ export function filterLogsByTimeFilter(logs: SupportLog[], tf: TimeFilter): Supp
   end.setHours(23, 59, 59, 999);
   return logs.filter(l => {
     if (!l.date) return false;
+    if (l.deletedAt) return false;
     const d = new Date(l.date + 'T00:00:00');
     return d >= start && d <= end;
   });
@@ -750,6 +751,7 @@ export type SupportLog = {
   date: string;   // 'YYYY-MM-DD'
   week: string;   // period bucket: 'W22', 'W21', …
   notes: string;
+  deletedAt?: string; // ISO timestamp; set on soft-delete, never hard-deleted
 };
 
 // Filter by actual date ranges so new real DB entries are always visible.

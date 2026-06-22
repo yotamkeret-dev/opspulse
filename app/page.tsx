@@ -1,5 +1,5 @@
 'use client';
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
 import { isAdmin } from '@/lib/approved-members';
@@ -18,7 +18,7 @@ import {
   SupportLog, TeamMember, TimeFilter, UnifiedActivity, buildUnifiedActivities,
   currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod, getPreviousPeriod,
   getDateRangeForFilter, getTimeFilterLabel, kpiRecords, mockProcurementRecords, seedSupportLogs,
-  teamMembers, timeRangeData,
+  teamMembers,
 } from './data/mock';
 
 // Maps the new TimeFilter to the legacy Period for sub-pages that still use mock data.
@@ -60,6 +60,7 @@ function rowToLog(row: Record<string, unknown>): SupportLog {
     date:         String(row.date),
     week:         String(row.week),
     notes:        String(row.notes ?? ''),
+    deletedAt:    row.deleted_at ? String(row.deleted_at) : undefined,
   };
 }
 
@@ -179,7 +180,21 @@ console.log('PROCUREMENT FROM DB:', data);
 
 return (data ?? []).map(rowToProcurementRecord);
 }
-
+function normalizeProcurementStatus(status?: string): ProcurementRecord['status'] {
+  const s = String(status ?? '').trim().toLowerCase();
+  // Already canonical
+  if (s === 'po arrived') return 'PO Arrived';
+  if (s === 'po issued')  return 'PO Issued';
+  // Delivered / received / paid / closed → goods have arrived
+  if (
+    s.includes('arrived')   || s.includes('delivered') || s.includes('receipt') ||
+    s.includes('received')  || s.includes('paid')      || s.includes('closed')  ||
+    s.includes('bill')      || s.includes('done')      || s.includes('complet') ||
+    s.includes('approved')
+  ) return 'PO Arrived';
+  // Everything else (pending, ordered, issued, open, in-progress…) → PO Issued
+  return 'PO Issued';
+}
 async function insertProcurementToDB(record: ProcurementRecord, createdByEmail?: string): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase.from('procurement_records').insert({
@@ -190,7 +205,7 @@ async function insertProcurementToDB(record: ProcurementRecord, createdByEmail?:
     supplier:            record.supplier,
     amount_usd:          record.amountUsd || null,
     category:            record.category,
-    status:              record.status,
+    status: normalizeProcurementStatus(record.status),
     notes:               record.notes,
     activity_date:
   record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
@@ -257,18 +272,16 @@ async function insertOperationsToDB(record: OperationsRecord): Promise<void> {
 
 async function updateSupportLogInDB(id: string, patch: Partial<SupportLog>): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase
-    .from('support_logs')
-    .update({
-      department: patch.department,
-      category:   patch.category,
-      title:      patch.title,
-      hours:      patch.hours,
-      date:       patch.date,
-      week:       patch.week,
-      notes:      patch.notes,
-    })
-    .eq('id', id);
+  const update: Record<string, unknown> = {};
+  if (patch.department !== undefined) update.department  = patch.department;
+  if (patch.category   !== undefined) update.category    = patch.category;
+  if (patch.title      !== undefined) update.title       = patch.title;
+  if (patch.hours      !== undefined) update.hours       = patch.hours;
+  if (patch.date       !== undefined) update.date        = patch.date;
+  if (patch.week       !== undefined) update.week        = patch.week;
+  if (patch.notes      !== undefined) update.notes       = patch.notes;
+  if (patch.deletedAt  !== undefined) update.deleted_at  = patch.deletedAt;
+  const { error } = await supabase.from('support_logs').update(update).eq('id', id);
   if (error) throw new Error(error.message);
 }
 
@@ -338,6 +351,76 @@ async function softDeleteOperationsRecord(
 
   if (error) throw new Error(error.message);
 }
+// ─── File Attachments ──────────────────────────────────────────────────────
+// Bucket: opspulse-attachments (public read, authenticated write)
+// Table:  record_attachments (id, record_type, record_id, file_name, file_path, file_size, uploaded_by, created_at)
+
+type RecordAttachment = {
+  id: string;
+  recordType: 'support_log' | 'procurement' | 'operations';
+  recordId: string;
+  fileName: string;
+  filePath: string;
+  fileSize?: number;
+  uploadedBy?: string;
+  createdAt?: string;
+};
+
+async function uploadAttachmentFile(
+  file: File,
+  recordType: 'support_log' | 'procurement' | 'operations',
+  recordId: string,
+  uploadedBy?: string
+): Promise<RecordAttachment> {
+  const supabase = createClient();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `${recordType}/${recordId}/${safeName}`;
+  const { error: uploadErr } = await supabase.storage
+    .from('opspulse-attachments')
+    .upload(path, file, { upsert: true });
+  if (uploadErr) throw new Error(`Upload failed: ${uploadErr.message}`);
+  const { data, error: dbErr } = await supabase
+    .from('record_attachments')
+    .insert({ record_type: recordType, record_id: recordId, file_name: file.name, file_path: path, file_size: file.size, uploaded_by: uploadedBy ?? null })
+    .select('id')
+    .single();
+  if (dbErr) throw new Error(`Attachment record failed: ${dbErr.message}`);
+  return { id: String(data.id), recordType, recordId, fileName: file.name, filePath: path, fileSize: file.size, uploadedBy };
+}
+
+async function fetchAttachmentsForRecord(recordType: string, recordId: string): Promise<RecordAttachment[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('record_attachments')
+    .select('*')
+    .eq('record_type', recordType)
+    .eq('record_id', recordId)
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchAttachments:', error.message); return []; }
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    id: String(r.id),
+    recordType: String(r.record_type) as RecordAttachment['recordType'],
+    recordId: String(r.record_id),
+    fileName: String(r.file_name),
+    filePath: String(r.file_path),
+    fileSize: r.file_size != null ? Number(r.file_size) : undefined,
+    uploadedBy: r.uploaded_by ? String(r.uploaded_by) : undefined,
+    createdAt: r.created_at ? String(r.created_at) : undefined,
+  }));
+}
+
+function getAttachmentPublicUrl(filePath: string): string {
+  const supabase = createClient();
+  return supabase.storage.from('opspulse-attachments').getPublicUrl(filePath).data.publicUrl;
+}
+
+async function removeAttachment(id: string, filePath: string): Promise<void> {
+  const supabase = createClient();
+  await supabase.storage.from('opspulse-attachments').remove([filePath]);
+  const { error } = await supabase.from('record_attachments').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 // ─── Money display helpers ─────────────────────────────────────────────────
 
 interface MoneyDisplay {
@@ -705,7 +788,7 @@ function EmployeePanel({ member, timeFilter, supportLogs, onClose }: {
   // Match by name for compatibility with both slug-id and email-id records
   const logs = filterLogsByTimeFilter(supportLogs, timeFilter).filter(l => l.employeeName === member.name);
   const hours = logs.reduce((s, l) => s + l.hours, 0);
-  const depts = [...new Set(logs.map(l => l.department))];
+  const depts = Array.from(new Set(logs.map(l => l.department)));
   const byDept = buildSupportByDept(logs);
 
   useEffect(() => {
@@ -787,7 +870,7 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
     // Match by name — works for both slug-id (legacy) and email-id (Supabase) records
     const logs = filtered.filter(l => l.employeeName === m.name);
     const hours = logs.reduce((s, l) => s + l.hours, 0);
-    const depts = [...new Set(logs.map(l => l.department))];
+    const depts = Array.from(new Set(logs.map(l => l.department)));
     const lastLog = logs[0];
     return { member: m, hours, activities: logs.length, depts, lastLog };
   }).filter(s => s.activities > 0);
@@ -795,7 +878,7 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
   const totalHours = filtered.reduce((s, l) => s + l.hours, 0);
   const totalActivities = filtered.length;
   const activeMembersCount = memberStats.length;
-  const deptCount = [...new Set(filtered.map(l => l.department))].length;
+  const deptCount = Array.from(new Set(filtered.map(l => l.department))).length;
 
   return (
     <>
@@ -1249,6 +1332,82 @@ function ProcurementDrillDown({ category, records, onClose }: {
 
 // ─── Procurement Entry Form ────────────────────────────────────────────────
 
+// ─── Attachment Widget ────────────────────────────────────────────────────
+// Used inside every create/edit form to show existing attachments and pick
+// a new file.  The parent form's save() calls uploadAttachmentFile() with
+// the resolved recordId after the record is persisted.
+
+function AttachmentWidget({
+  recordType, recordId, pendingFile, onPendingFileChange,
+}: {
+  recordType: 'support_log' | 'procurement' | 'operations';
+  recordId?: string;
+  pendingFile: File | null;
+  onPendingFileChange: (f: File | null) => void;
+}) {
+  const [attachments, setAttachments] = useState<RecordAttachment[]>([]);
+  const [attLoading,  setAttLoading]  = useState(false);
+
+  useEffect(() => {
+    if (!recordId || DEMO_MODE) return;
+    setAttLoading(true);
+    fetchAttachmentsForRecord(recordType, recordId)
+      .then(setAttachments)
+      .finally(() => setAttLoading(false));
+  }, [recordId, recordType]);
+
+  const handleRemove = async (att: RecordAttachment) => {
+    if (!confirm(`Delete "${att.fileName}"?`)) return;
+    try {
+      await removeAttachment(att.id, att.filePath);
+      setAttachments(prev => prev.filter(a => a.id !== att.id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete attachment.');
+    }
+  };
+
+  return (
+    <div>
+      <div className="kpi-label" style={{ marginBottom: 4 }}>Attachment</div>
+      {DEMO_MODE ? (
+        <div className="form-note">File attachments require production mode (Supabase)</div>
+      ) : (
+        <>
+          {attLoading && <div className="form-note">Loading attachments…</div>}
+          {attachments.map(att => (
+            <div key={att.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <a href={getAttachmentPublicUrl(att.filePath)} target="_blank" rel="noreferrer"
+                style={{ color: 'var(--color-accent)', fontSize: 12, textDecoration: 'underline' }}>
+                📎 {att.fileName}{att.fileSize ? ` (${Math.round(att.fileSize / 1024)}KB)` : ''}
+              </a>
+              <button onClick={() => handleRemove(att)}
+                style={{ background: 'none', border: 'none', color: 'var(--color-critical)', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
+            </div>
+          ))}
+          {pendingFile ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="small" style={{ color: 'var(--color-completed)' }}>
+                📎 {pendingFile.name} — will upload on save
+              </span>
+              <button onClick={() => onPendingFileChange(null)}
+                style={{ background: 'none', border: 'none', color: 'var(--color-critical)', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
+            </div>
+          ) : (
+            <label style={{ cursor: 'pointer', display: 'inline-block' }}>
+              <input type="file" style={{ display: 'none' }}
+                onChange={e => onPendingFileChange(e.target.files?.[0] ?? null)} />
+              <span style={{
+                background: 'rgba(255,255,255,.07)', border: '1px solid var(--color-border)',
+                color: '#e8eef7', borderRadius: 10, padding: '7px 14px', fontSize: 13,
+              }}>+ Attach file</span>
+            </label>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ProcurementEntryForm({
   onSave,
   onCancel,
@@ -1287,6 +1446,7 @@ const [date, setDate] = useState(
   initialRecord?.date ?? new Date().toISOString().slice(0, 10)
 );
   const [converting,  setConverting]  = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 useEffect(() => {
   console.log('FORM initialRecord:', initialRecord);
 
@@ -1347,8 +1507,16 @@ exchangeRateDate =
     }
 
     setConverting(false);
+    const recordId = initialRecord?.id ?? `PR-${Date.now()}`;
+    if (pendingFile && !DEMO_MODE) {
+      try {
+        await uploadAttachmentFile(pendingFile, 'procurement', recordId);
+      } catch (err) {
+        console.error('Attachment upload failed:', err);
+      }
+    }
     onSave({
-      id:              `PR-${Date.now()}`,
+      id:              recordId,
       employeeId,
       employeeName:    member.name,
       poNumber:        poNumber.trim(),
@@ -1419,6 +1587,14 @@ exchangeRateDate =
         <div>
           <div className="kpi-label">Notes</div>
           <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional context or outcome" />
+        </div>
+        <div>
+          <AttachmentWidget
+            recordType="procurement"
+            recordId={initialRecord?.id}
+            pendingFile={pendingFile}
+            onPendingFileChange={setPendingFile}
+          />
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
@@ -1970,7 +2146,7 @@ if (rawAmount > 0 && rawCurrency !== 'USD') {
         supplier:         m.data.supplier  ?? '',
 amountUsd: convertedAmountUsd,       
 category: m.data.category ?? 'PO Created',
-status: (m.data.status === 'PO Arrived' || m.data.status === 'PO Issued' ? m.data.status : 'PO Issued'),
+status: normalizeProcurementStatus(m.data.status),
 notes: (needsReview ? '[NEEDS REVIEW] ' : '') + (m.data.notes ?? ''),
 date: normalizedDate,
 originalCurrency: rawCurrency,
@@ -1983,33 +2159,40 @@ exchangeRateDate: convertedRateDate,
         // Store raw import metadata alongside the record
         const rawImport = { ...m.rawImport, extractedRows: undefined }; // trim for size
         const supabase = createClient();
-        const { error } = await supabase
+        const activityDate = record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
+          ? record.date
+          : new Date().toISOString().slice(0, 10);
+        const { data: inserted, error } = await supabase
           .from('procurement_records')
           .insert({
-            id:                 record.id,
-            employee_id:        record.employeeId,
-            employee_name:      record.employeeName,
-            po_number:          record.poNumber || null,
-            supplier:           record.supplier,
-            amount_usd:         record.amountUsd || null,
-            category:           record.category,
-            status:             record.status,
-            notes:              record.notes,
-activity_date:
-  record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
-    ? record.date
-    : new Date().toISOString().slice(0, 10),            raw_import:         rawImport,
-            original_amount:    record.originalAmount   ?? record.amountUsd ?? null,
-            original_currency:  record.originalCurrency ?? 'USD',
-            exchange_rate:      record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
-            exchange_rate_date:
-  record.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(record.exchangeRateDate)
-    ? record.exchangeRateDate
-    : new Date().toISOString().slice(0, 10),
-            created_by:         record.createdBy         ?? null,
+            id:                record.id,
+            employee_id:       record.employeeId,
+            employee_name:     record.employeeName,
+            po_number:         record.poNumber || null,
+            supplier:          record.supplier,
+            amount_usd:        record.amountUsd || null,
+            category:          record.category,
+            status:            normalizeProcurementStatus(record.status),
+            notes:             record.notes,
+            activity_date:     activityDate,
+            raw_import:        rawImport,
+            original_amount:   record.originalAmount   ?? record.amountUsd ?? null,
+            original_currency: record.originalCurrency ?? 'USD',
+            exchange_rate:     record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
+            exchange_rate_date: record.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(record.exchangeRateDate)
+              ? record.exchangeRateDate
+              : new Date().toISOString().slice(0, 10),
+            created_by:        record.createdBy ?? null,
           })
           .select('id');
-        if (error) { console.error('import insert:', error.message); continue; }
+        if (error) {
+          console.error(`import insert [${i}] ${record.poNumber || record.supplier}:`, error.message, error.details);
+          continue;
+        }
+        if (!inserted || inserted.length === 0) {
+          console.error(`import insert [${i}]: row was silently rejected (RLS?)`);
+          continue;
+        }
         onRecordAdded?.(record);
 
         // Create support_log so imported PO appears in Activity Feed + Team Last Updates
@@ -2017,26 +2200,31 @@ activity_date:
           const summaryTitle =
             `PO imported: ${record.poNumber || 'N/A'} — ${record.supplier} — $${(record.amountUsd || 0).toLocaleString()}`;
           const logEntry: SupportLog = {
-            id:           `LOG-import-${Date.now()}-${i}`,
+            id:           `LOG-import-${record.id}`,
             employeeId:   finalEmployeeId,
             employeeName: finalEmployeeName,
             department:   'Operations',
             category:     'Procurement',
             title:        summaryTitle,
-           hours: 0.1,
-            date:         record.date,
-            week:         getWeekTag(record.date),
+            hours:        0.1,
+            date:         activityDate,
+            week:         getWeekTag(activityDate),
             notes:        `Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
           };
-          console.log('IMPORT LOG ENTRY:', logEntry);
-          console.log('IMPORT RECORD:', record);
           await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
         }
       }
 
       setRecords(prev => [...prev, record]);
     }
-    setShowImport(false);
+
+    // Refresh records from DB so the table reflects any date-based filtering correctly.
+    // Don't close the import panel here — let ProcurementImportPanel show its "done" step.
+    if (!DEMO_MODE) {
+      fetchProcurementFromDB(timeFilter)
+        .then(fresh => setRecords(fresh))
+        .catch(e => console.error('post-import refresh:', e.message));
+    }
   };
 
   return (
@@ -2127,41 +2315,45 @@ activity_date:
               <tr><th>Category</th><th>PO Number</th><th>Supplier</th><th>Amount</th><th>Owner</th><th>Date</th><th>Status</th></tr>
             </thead>
             <tbody>
-              {records.map(r => (
-                <Fragment key={r.id}>
-                <tr>
-                  <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
-                  <td><span className="rec-id">{r.poNumber || '—'}</span></td>
-                  <td><b>{r.supplier}</b>{r.notes && <div className="small">{r.notes}</div>}</td>
-                  <td><MoneyCell record={r} /></td>
-                  <td>{r.employeeName}</td>
-                  <td>{r.date}</td>
-<td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>                  <td style={{ display:'flex', gap:8, alignItems:'center' }}>
-                    {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
-                      <button onClick={() => setEditingId(r.id)} style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Edit</button>
-                    )}
-                    {canDelete(r) && editingId !== r.id && (
-                      <button onClick={() => setDeletingRecord(r)} style={{ background:'none', border:'none', color:'var(--color-critical)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>Delete</button>
-                    )}
-                  </td>
-                </tr>
-                {editingId === r.id && (
-                  <tr key={`edit-${r.id}`}>
-                    <td colSpan={8} style={{ padding: 0 }}>
-                      <div style={{ padding: '0 10px 10px' }}>
- <ProcurementEntryForm
-  key={`edit-form-${r.id}`}
-  initialRecord={r}
-  onSave={rec => handleEdit(r.id, rec)}
-  onCancel={() => setEditingId(null)}
-  activeTeamMembers={activeTeamMembers}
-/>
-                      </div>
+              {records.flatMap(r => {
+                const rows = [
+                  <tr key={r.id}>
+                    <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
+                    <td><span className="rec-id">{r.poNumber || '—'}</span></td>
+                    <td><b>{r.supplier}</b>{r.notes && <div className="small">{r.notes}</div>}</td>
+                    <td><MoneyCell record={r} /></td>
+                    <td>{r.employeeName}</td>
+                    <td>{r.date}</td>
+                    <td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>
+                    <td style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
+                        <button onClick={() => setEditingId(r.id)} style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit</button>
+                      )}
+                      {canDelete(r) && editingId !== r.id && (
+                        <button onClick={() => setDeletingRecord(r)} style={{ background: 'none', border: 'none', color: 'var(--color-critical)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Delete</button>
+                      )}
                     </td>
-                  </tr>
-                )}
-                </Fragment>
-              ))}
+                  </tr>,
+                ];
+                if (editingId === r.id) {
+                  rows.push(
+                    <tr key={`edit-${r.id}`}>
+                      <td colSpan={8} style={{ padding: 0 }}>
+                        <div style={{ padding: '0 10px 10px' }}>
+                          <ProcurementEntryForm
+                            key={`edit-form-${r.id}`}
+                            initialRecord={r}
+                            onSave={rec => handleEdit(r.id, rec)}
+                            onCancel={() => setEditingId(null)}
+                            activeTeamMembers={activeTeamMembers}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                return rows;
+              })}
             </tbody>
           </table>
         </div>
@@ -2186,17 +2378,25 @@ function SupportLogEditPanel({ log, onSave, onCancel }: {
   onSave: (patch: Partial<SupportLog>) => void;
   onCancel: () => void;
 }) {
-  const [department, setDepartment] = useState(log.department);
-  const [category,   setCategory]   = useState(log.category);
-  const [title,      setTitle]      = useState(log.title);
-  const [hours,      setHours]      = useState(String(log.hours));
-  const [date,       setDate]       = useState(log.date);
-  const [notes,      setNotes]      = useState(log.notes);
+  const [department,  setDepartment]  = useState(log.department);
+  const [category,    setCategory]    = useState(log.category);
+  const [title,       setTitle]       = useState(log.title);
+  const [hours,       setHours]       = useState(String(log.hours));
+  const [date,        setDate]        = useState(log.date);
+  const [notes,       setNotes]       = useState(log.notes);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
-  const save = () => {
+  const save = async () => {
     if (!title.trim() || !hours || parseFloat(hours) <= 0) {
       alert('Title and a positive number of hours are required.');
       return;
+    }
+    if (pendingFile && !DEMO_MODE) {
+      try {
+        await uploadAttachmentFile(pendingFile, 'support_log', log.id);
+      } catch (err) {
+        console.error('Attachment upload failed:', err);
+      }
     }
     onSave({ department, category, title, hours: parseFloat(hours), date, week: getWeekTag(date), notes });
   };
@@ -2232,6 +2432,14 @@ function SupportLogEditPanel({ log, onSave, onCancel }: {
         <div style={{ gridColumn: '1 / -1' }}>
           <div className="kpi-label">Notes</div>
           <input className="input" value={notes} onChange={e => setNotes(e.target.value)} />
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <AttachmentWidget
+            recordType="support_log"
+            recordId={log.id}
+            pendingFile={pendingFile}
+            onPendingFileChange={setPendingFile}
+          />
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
@@ -2300,26 +2508,36 @@ function OperationsDrillDown({ category, records, onClose }: {
 
 // ─── Operations Entry Form ─────────────────────────────────────────────────
 
-function OperationsEntryForm({ onSave, onCancel, activeTeamMembers }: {
+function OperationsEntryForm({ onSave, onCancel, activeTeamMembers, initialRecord }: {
   onSave: (r: OperationsRecord) => void;
   onCancel: () => void;
   activeTeamMembers: TeamMember[];
+  initialRecord?: OperationsRecord;
 }) {
-  const [employeeId, setEmployeeId] = useState('');
-  const [category,   setCategory]   = useState<OperationsCategory>(OPERATIONS_CATEGORIES[0]);
-  const [quantity,   setQuantity]   = useState('');
-  const [status,     setStatus]     = useState<OperationsStatus>('Completed');
-  const [notes,      setNotes]      = useState('');
-  const [date,       setDate]       = useState(new Date().toISOString().slice(0, 10));
+  const [employeeId,  setEmployeeId]  = useState(initialRecord?.employeeId ?? '');
+  const [category,    setCategory]    = useState<OperationsCategory>(initialRecord?.category ?? OPERATIONS_CATEGORIES[0]);
+  const [quantity,    setQuantity]    = useState(initialRecord?.quantity?.toString() ?? '');
+  const [status,      setStatus]      = useState<OperationsStatus>(initialRecord?.status ?? 'Completed');
+  const [notes,       setNotes]       = useState(initialRecord?.notes ?? '');
+  const [date,        setDate]        = useState(initialRecord?.date ?? new Date().toISOString().slice(0, 10));
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
 
-  const save = () => {
+  const save = async () => {
     if (!employeeId) { alert('Please select an employee.'); return; }
     const qty = Number(quantity);
     if (!quantity.trim() || isNaN(qty) || qty <= 0) { alert('Quantity must be a positive number.'); return; }
     const member = activeTeamMembers.find(m => m.id === employeeId);
     if (!member) return;
+    const recordId = initialRecord?.id ?? `OPS-${Date.now()}`;
+    if (pendingFile && !DEMO_MODE) {
+      try {
+        await uploadAttachmentFile(pendingFile, 'operations', recordId);
+      } catch (err) {
+        console.error('Attachment upload failed:', err);
+      }
+    }
     onSave({
-      id:           `OPS-${Date.now()}`,
+      id:           recordId,
       employeeId,
       employeeName: member.name,
       date,
@@ -2332,7 +2550,7 @@ function OperationsEntryForm({ onSave, onCancel, activeTeamMembers }: {
 
   return (
     <div className="card" style={{ marginBottom: 18 }}>
-      <h2 className="section-title">Log Operations Activity</h2>
+      <h2 className="section-title">{initialRecord ? 'Edit Operations Record' : 'Log Operations Activity'}</h2>
       <div className="grid two">
         <div>
           <div className="kpi-label">Employee *</div>
@@ -2365,9 +2583,19 @@ function OperationsEntryForm({ onSave, onCancel, activeTeamMembers }: {
           <div className="kpi-label">Notes</div>
           <input className="input" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional context or outcome" />
         </div>
+        <div>
+          <AttachmentWidget
+            recordType="operations"
+            recordId={initialRecord?.id}
+            pendingFile={pendingFile}
+            onPendingFileChange={setPendingFile}
+          />
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-        <button className="save-button" style={{ marginTop: 0 }} onClick={save}>Save</button>
+        <button className="save-button" style={{ marginTop: 0 }} onClick={save}>
+          {initialRecord ? 'Save Changes' : 'Save'}
+        </button>
         <button onClick={onCancel} style={{ background: 'rgba(255,255,255,.07)', border: '1px solid var(--color-border)', color: '#e8eef7', borderRadius: 12, padding: '11px 20px', cursor: 'pointer', fontFamily: 'inherit', fontSize: 14 }}>Cancel</button>
       </div>
     </div>
@@ -2426,7 +2654,6 @@ const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(nu
     }
   };
 const handleDelete = async (id: string) => {
-  alert('delete clicked');
   if (!confirm('Delete this operations record?')) return;
   try {
    if (!DEMO_MODE) await softDeleteOperationsRecord(id);
@@ -2489,55 +2716,32 @@ const handleDelete = async (id: string) => {
           <table className="table">
             <thead><tr><th>Category</th><th>Qty</th><th>Employee</th><th>Date</th><th>Status</th><th>Notes</th><th></th></tr></thead>
             <tbody>
-              {records.map(r => (
-                <Fragment key={r.id}>
-                  <tr>
+              {records.flatMap(r => {
+                const rows = [
+                  <tr key={r.id}>
                     <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
                     <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{r.quantity}</td>
                     <td>{r.employeeName}</td>
                     <td>{r.date}</td>
                     <td><span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : 'status-in-progress'}`}>{r.status}</span></td>
                     <td><span className="small">{r.notes || '—'}</span></td>
-                    <td>
+                    <td style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
-  <button
-    onClick={() => setEditingId(r.id)}
-    style={{
-      background: 'none',
-      border: 'none',
-      color: 'var(--color-accent)',
-      fontSize: 11,
-      fontWeight: 700,
-      cursor: 'pointer',
-      padding: 0
-    }}
-  >
-    Edit
-  </button>
-)}
+                        <button onClick={() => setEditingId(r.id)} style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit</button>
+                      )}
                       {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
-  <button
-onClick={() => handleDelete(r.id)}    style={{
-      background: 'none',
-      border: 'none',
-      color: 'var(--color-danger)',
-      fontSize: 11,
-      fontWeight: 700,
-      cursor: 'pointer',
-      padding: 0,
-      marginLeft: 8
-    }}
-  >
-   Delete 
-  </button>
-)}
+                        <button onClick={() => handleDelete(r.id)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Delete</button>
+                      )}
                     </td>
-                  </tr>
-                  {editingId === r.id && (
+                  </tr>,
+                ];
+                if (editingId === r.id) {
+                  rows.push(
                     <tr key={`edit-${r.id}`}>
                       <td colSpan={7} style={{ padding: 0 }}>
                         <div style={{ padding: '0 10px 10px' }}>
                           <OperationsEntryForm
+                            initialRecord={r}
                             onSave={rec => handleEdit(r.id, rec)}
                             onCancel={() => setEditingId(null)}
                             activeTeamMembers={activeTeamMembers}
@@ -2545,9 +2749,10 @@ onClick={() => handleDelete(r.id)}    style={{
                         </div>
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              ))}
+                  );
+                }
+                return rows;
+              })}
             </tbody>
           </table>
         </div>
@@ -2817,12 +3022,23 @@ function ActivityFeed({ timeFilter, allActivities, supportLogs, authUserEmail, o
   onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+const handleDelete = (id: string) => {
+  if (!confirm('Delete this activity?')) return;
+
+  if (onUpdateLog) {
+    onUpdateLog(id, { deletedAt: new Date().toISOString() } as Partial<SupportLog>);
+  }
+};
   const { start, end } = getDateRangeForFilter(timeFilter);
   end.setHours(23, 59, 59, 999);
   const items = allActivities.filter(a => {
-    const d = new Date(a.date + 'T00:00:00');
-    return d >= start && d <= end;
-  });
+  const d = new Date(a.date + 'T00:00:00');
+
+  return (
+    d >= start &&
+    d <= end &&
+!(a as any).deletedAt  );
+});
 
   const typeLabel: Record<string, string> = {
     support: '🕐 Support', procurement: '📄 Procurement', operations: '📦 Operations',
@@ -2870,11 +3086,21 @@ function ActivityFeed({ timeFilter, allActivities, supportLogs, authUserEmail, o
                     <div className="event-meta">
                       <span className="owner-tag">↳ {a.employeeName}</span>
                       {a.hours != null && <span className="status-badge status-completed">{a.hours}h</span>}
-                      {l && authUserEmail && l.employeeId === authUserEmail && (
-                        <button onClick={() => setEditingId(a.id)}
-                          style={{ background:'none', border:'none', color:'var(--color-accent)', fontSize:11, fontWeight:700, cursor:'pointer', padding:0 }}>
-                          Edit
-                        </button>
+                      {authUserEmail && a.employeeId === authUserEmail && (
+                        <span>
+                          <button
+                            onClick={() => setEditingId(a.id)}
+                            style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(a.id)}
+                            style={{ background: 'none', border: 'none', color: 'var(--color-danger)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0, marginLeft: 8 }}
+                          >
+                            Delete
+                          </button>
+                        </span>
                       )}
                     </div>
                   </>
@@ -2891,7 +3117,13 @@ function ActivityFeed({ timeFilter, allActivities, supportLogs, authUserEmail, o
 
 // ─── Add Weekly Activity (primary contribution logging engine) ─────────────
 
-function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: SupportLog) => void; activeTeamMembers: TeamMember[] }) {
+function AddWeeklyActivity({
+  addLog, activeTeamMembers, onUpdateLog,
+}: {
+  addLog: (log: SupportLog) => void;
+  activeTeamMembers: TeamMember[];
+  onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
+}) {
   const [employeeId,  setEmployeeId]  = useState('');
   const [department,  setDepartment]  = useState('R&D');
   const [category,    setCategory]    = useState<string>(ACTIVITY_CATEGORIES[0]);
@@ -2899,16 +3131,25 @@ function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: Suppor
   const [hours,       setHours]       = useState('');
   const [date,        setDate]        = useState(new Date().toISOString().slice(0, 10));
   const [notes,       setNotes]       = useState('');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [recent,      setRecent]      = useState<SupportLog[]>([]);
+  const [editingId,   setEditingId]   = useState<string | null>(null);
 
-  const save = () => {
+  const handleDelete = (id: string) => {
+    if (!confirm('Delete this activity?')) return;
+    setRecent(prev => prev.filter(l => l.id !== id));
+    onUpdateLog?.(id, { deletedAt: new Date().toISOString() });
+  };
+
+  const save = async () => {
     const member = activeTeamMembers.find(m => m.id === employeeId);
     if (!member || !title.trim() || !hours || parseFloat(hours) <= 0) {
       alert('Please fill in all required fields (Employee, Title, Hours).');
       return;
     }
+    const logId = `LOG-${Date.now()}`;
     const log: SupportLog = {
-      id: `LOG-${Date.now()}`,
+      id: logId,
       employeeId,
       employeeName: member.name,
       department,
@@ -2916,14 +3157,22 @@ function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: Suppor
       title,
       hours: parseFloat(hours),
       date: date && /^\d{4}-\d{2}-\d{2}$/.test(date)
-  ? date
-  : new Date().toISOString().slice(0, 10),
+        ? date
+        : new Date().toISOString().slice(0, 10),
       week: getWeekTag(date),
       notes,
     };
     addLog(log);
+    if (pendingFile && !DEMO_MODE) {
+      try {
+        await uploadAttachmentFile(pendingFile, 'support_log', logId);
+      } catch (err) {
+        console.error('Attachment upload failed:', err);
+      }
+    }
     setRecent(prev => [log, ...prev]);
     setTitle(''); setHours(''); setNotes('');
+    setPendingFile(null);
   };
 
   return (
@@ -2935,6 +3184,12 @@ function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: Suppor
 
       <div className="card">
         <h2 className="section-title">Log Contribution</h2>
+        <AttachmentWidget
+          recordType="support_log"
+          recordId={undefined}
+          pendingFile={pendingFile}
+          onPendingFileChange={setPendingFile}
+        />
         <div className="grid two">
           <div>
             {/*
@@ -2987,18 +3242,59 @@ function AddWeeklyActivity({ addLog, activeTeamMembers }: { addLog: (log: Suppor
       {recent.length > 0 && (
         <div className="card">
           <h2 className="section-title">Submitted This Session</h2>
-          <table className="table">
-            <thead><tr><th>Employee</th><th>Department</th><th>Activity</th><th>Hours</th><th>Date</th></tr></thead>
-            <tbody>
-              {recent.map(l => (
-                <tr key={l.id}>
-                  <td>{l.employeeName}</td>
-                  <td>{l.department}</td>
-                  <td><b>{l.title}</b>{l.notes && <div className="small">{l.notes}</div>}</td>
-                  <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{l.hours}h</td>
-                  <td>{l.date}</td>
-                </tr>
-              ))}
+         <table className="table">
+  <thead>
+    <tr>
+      <th>Employee</th>
+      <th>Department</th>
+      <th>Activity</th>
+      <th>Hours</th>
+      <th>Date</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+{recent.flatMap(l => {
+  const rows = [
+    <tr key={l.id}>
+      <td>{l.employeeName}</td>
+      <td>{l.department}</td>
+      <td><b>{l.title}</b>{l.notes && <div className="small">{l.notes}</div>}</td>
+      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{l.hours}h</td>
+      <td>{l.date}</td>
+      <td>
+        {editingId !== l.id && (
+          <span style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setEditingId(l.id)} style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit</button>
+            <button onClick={() => handleDelete(l.id)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Delete</button>
+          </span>
+        )}
+        {editingId === l.id && (
+          <button onClick={() => setEditingId(null)} style={{ background: 'none', border: 'none', color: 'var(--color-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Cancel</button>
+        )}
+      </td>
+    </tr>,
+  ];
+  if (editingId === l.id) {
+    rows.push(
+      <tr key={`edit-${l.id}`}>
+        <td colSpan={6} style={{ padding: 0 }}>
+          <SupportLogEditPanel
+            log={l}
+            onSave={patch => {
+              const updated = { ...l, ...patch };
+              setRecent(prev => prev.map(x => x.id === l.id ? updated : x));
+              onUpdateLog?.(l.id, patch);
+              setEditingId(null);
+            }}
+            onCancel={() => setEditingId(null)}
+          />
+        </td>
+      </tr>
+    );
+  }
+  return rows;
+})}
             </tbody>
           </table>
         </div>
@@ -3150,9 +3446,6 @@ export default function App() {
     );
   }
 
-  // Sub-pages still use mock timeRangeData keyed by legacy Period
-  const period = timeFilterToPeriod(timeFilter);
-const data = timeRangeData[period];
   let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} allActivities={allActivities} />;
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   
@@ -3161,7 +3454,7 @@ const data = timeRangeData[period];
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} allActivities={allActivities} supportLogs={supportLogs} authUserEmail={authUser?.email} onUpdateLog={updateLog} />;
-  if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} />;
+  if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} onUpdateLog={updateLog} />;
 
   return (
     <Shell
