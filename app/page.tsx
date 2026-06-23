@@ -21,6 +21,12 @@ import {
   teamMembers,
 } from './data/mock';
 
+// Round hours to nearest 0.5 and format for display (e.g. 4, 4.5, 72.5).
+function fmtHours(n: number): string {
+  const r = Math.round(n * 2) / 2;
+  return String(r);
+}
+
 // Maps the new TimeFilter to the legacy Period for sub-pages that still use mock data.
 function timeFilterToPeriod(tf: TimeFilter): Period {
   return tf.periodType === 'week' ? 'weekly' : tf.periodType === 'month' ? 'monthly' : 'quarterly';
@@ -765,7 +771,7 @@ function TeamMemberPanel({ memberName, timeFilter, allActivities, onClose }: {
                       <td style={{ whiteSpace: 'nowrap' }}>
                         {a.amountUsd != null && a.amountUsd > 0 && <MoneyCell record={{ amountUsd: a.amountUsd, originalAmount: a.originalAmount, originalCurrency: a.originalCurrency }} />}
                         {a.quantity   != null && <span style={{ fontWeight: 700, color: 'var(--color-accent)' }}>{a.quantity} units</span>}
-                        {a.hours      != null && a.hours > 0 && <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{a.hours}h</span>}
+                        {a.hours      != null && a.hours > 0 && <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{fmtHours(a.hours)}h</span>}
                       </td>
                       <td><span className="small">{a.date}</span></td>
                     </tr>
@@ -806,7 +812,7 @@ function EmployeePanel({ member, timeFilter, supportLogs, onClose }: {
             <h3>{member.name}</h3>
             <div className="small" style={{ marginTop: 2 }}>{member.role}</div>
             <div className="small" style={{ marginTop: 4 }}>
-              {hours}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {getTimeFilterLabel(timeFilter)}
+              {fmtHours(hours)}h · {logs.length} activities · {depts.length} dept{depts.length !== 1 ? 's' : ''} · {getTimeFilterLabel(timeFilter)}
             </div>
           </div>
           <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
@@ -826,7 +832,7 @@ function EmployeePanel({ member, timeFilter, supportLogs, onClose }: {
                 {byDept.map(({ name, hours: h }) => (
                   <div key={name} style={{ display: 'flex', justifyContent: 'space-between', padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,.05)', fontSize: 13 }}>
                     <span>{name}</span>
-                    <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{h}h</span>
+                    <span style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{fmtHours(h)}h</span>
                   </div>
                 ))}
               </div>
@@ -845,7 +851,7 @@ function EmployeePanel({ member, timeFilter, supportLogs, onClose }: {
                           {l.notes && <div className="rec-notes">{l.notes}</div>}
                         </td>
                         <td><span className="pill" style={{ fontSize: 11, padding: '2px 6px' }}>{l.department}</span></td>
-                        <td style={{ fontWeight: 700, color: 'var(--color-completed)', whiteSpace: 'nowrap' }}>{l.hours}h</td>
+                        <td style={{ fontWeight: 700, color: 'var(--color-completed)', whiteSpace: 'nowrap' }}>{fmtHours(l.hours)}h</td>
                         <td><span className="small">{l.date}</span></td>
                       </tr>
                     ))}
@@ -894,7 +900,7 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
       <div className="grid kpis">
         <div className="card kpi-p1">
           <div className="kpi-label">Total Support Hours</div>
-          <div className="kpi-value">{totalHours}h</div>
+          <div className="kpi-value">{fmtHours(totalHours)}h</div>
           <div className="kpi-note">Team combined output</div>
         </div>
         <div className="card kpi-p1">
@@ -926,7 +932,7 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
               </div>
               <div className="contrib-stats">
                 <div className="contrib-stat">
-                  <div className="contrib-stat-value">{hours}h</div>
+                  <div className="contrib-stat-value">{fmtHours(hours)}h</div>
                   <div className="contrib-stat-label">Hours</div>
                 </div>
                 <div className="contrib-stat">
@@ -987,7 +993,7 @@ function ExecSummaryCard({ currentLogs, previousLogs, currentProc, previousProc 
   };
   const metrics: { label: string; cur: number; prev: number; fmt?: (n: number) => string }[] = [
     { label: 'Activities',    cur: c.activities, prev: p.activities },
-    { label: 'Support Hours', cur: c.hours,      prev: p.hours,     fmt: n => `${n}h` },
+    { label: 'Support Hours', cur: c.hours,      prev: p.hours,     fmt: (n: number) => `${fmtHours(n)}h` },
     { label: 'PO Created',    cur: c.po,         prev: p.po        },
     { label: 'Emergency',     cur: c.emergency,  prev: p.emergency  },
     { label: 'Payments',      cur: c.payments,   prev: p.payments   },
@@ -1254,7 +1260,7 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
                 <YAxis type="category" dataKey="name" stroke="var(--color-muted)" tick={{ fontSize: 12 }} width={72} />
                 <Tooltip contentStyle={{ background: '#0d192b', border: '1px solid rgba(255,255,255,.1)', borderRadius: 10 }} />
                 <Bar dataKey="hours" fill="var(--color-completed)" radius={[0, 8, 8, 0]}>
-                  <LabelList dataKey="hours" position="right" formatter={(v: unknown) => `${v}h`} style={{ fill: '#ffffff', fontWeight: 700, fontSize: 12 }} />
+                  <LabelList dataKey="hours" position="right" formatter={(v: unknown) => `${fmtHours(Number(v))}h`} style={{ fill: '#ffffff', fontWeight: 700, fontSize: 12 }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -2827,7 +2833,7 @@ function Support({ timeFilter, supportLogs }: { timeFilter: TimeFilter; supportL
                 return (
                   <tr key={name}>
                     <td><b>{name}</b></td>
-                    <td>{hours}h</td>
+                    <td>{fmtHours(hours)}h</td>
                     <td>{activities}</td>
                     <td>{impacts[name] ?? 'Cross-functional support'}</td>
                   </tr>
@@ -2900,18 +2906,18 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
     t += `Generated: ${new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}\n\n`;
     t += `ACTIVITY\n`;
     t += `${pad('Activities Completed:', 26)}${c.activities}\n`;
-    t += `${pad('Support Hours:', 26)}${c.hours}h\n\n`;
+    t += `${pad('Support Hours:', 26)}${fmtHours(c.hours)}h\n\n`;
     t += `PROCUREMENT\n`;
     t += `${pad('PO Created:', 26)}${c.po}\n`;
     t += `${pad('Emergency Requests:', 26)}${c.emergency}\n`;
     t += `${pad('Supplier Payments:', 26)}${c.payments}\n`;
     if (byDept.length > 0) {
       t += `\nSUPPORT BY DEPARTMENT\n`;
-      byDept.forEach(d => { t += `${pad(d.name, 24)}${d.hours}h\n`; });
+      byDept.forEach(d => { t += `${pad(d.name, 24)}${fmtHours(d.hours)}h\n`; });
     }
     if (contributors.length > 0) {
       t += `\nTOP CONTRIBUTORS\n`;
-      contributors.forEach(x => { t += `${pad(x.name, 24)}${x.hours}h · ${x.activities} activities\n`; });
+      contributors.forEach(x => { t += `${pad(x.name, 24)}${fmtHours(x.hours)}h · ${x.activities} activities\n`; });
     }
     const slug = period.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '');
     const blob = new Blob([t], { type: 'text/plain;charset=utf-8' });
@@ -2923,7 +2929,7 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
 
   const metrics = [
     { label: 'Activities Completed', cur: c.activities, prev: p.activities, fmt: String },
-    { label: 'Support Hours',        cur: c.hours,      prev: p.hours,      fmt: (n: number) => `${n}h` },
+    { label: 'Support Hours',        cur: c.hours,      prev: p.hours,      fmt: (n: number) => `${fmtHours(n)}h` },
     { label: 'PO Created',           cur: c.po,         prev: p.po,         fmt: String },
     { label: 'Emergency Requests',   cur: c.emergency,  prev: p.emergency,  fmt: String },
     { label: 'Supplier Payments',    cur: c.payments,   prev: p.payments,   fmt: String },
@@ -2980,7 +2986,7 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
                   {byDept.map(({ name, hours }) => (
                     <tr key={name}>
                       <td><b>{name}</b></td>
-                      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{hours}h</td>
+                      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{fmtHours(hours)}h</td>
                       <td>{filtered.filter(l => l.department === name).length}</td>
                     </tr>
                   ))}
@@ -2998,7 +3004,7 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
                   {contributors.map(x => (
                     <tr key={x.name}>
                       <td><b>{x.name}</b><div className="small">{x.role}</div></td>
-                      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{x.hours}h</td>
+                      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{fmtHours(x.hours)}h</td>
                       <td>{x.activities}</td>
                     </tr>
                   ))}
@@ -3085,7 +3091,7 @@ const handleDelete = (id: string) => {
                     {a.notes && <div className="small">{a.notes}</div>}
                     <div className="event-meta">
                       <span className="owner-tag">↳ {a.employeeName}</span>
-                      {a.hours != null && <span className="status-badge status-completed">{a.hours}h</span>}
+                      {a.hours != null && <span className="status-badge status-completed">{fmtHours(a.hours)}h</span>}
                       {authUserEmail && a.employeeId === authUserEmail && (
                         <span>
                           <button
@@ -3260,7 +3266,7 @@ function AddWeeklyActivity({
       <td>{l.employeeName}</td>
       <td>{l.department}</td>
       <td><b>{l.title}</b>{l.notes && <div className="small">{l.notes}</div>}</td>
-      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{l.hours}h</td>
+      <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{fmtHours(l.hours)}h</td>
       <td>{l.date}</td>
       <td>
         {editingId !== l.id && (
