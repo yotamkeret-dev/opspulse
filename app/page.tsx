@@ -496,10 +496,25 @@ function getWeekTag(dateStr: string): string {
   return `W${String(weekNum).padStart(2, '0')}`;
 }
 
-// Derive support chart data from logs
+const SUPPORT_DEPARTMENTS = [
+  'R&D', 'Product Design', 'Production', 'Procurement', 'Operations',
+  'Logistics', 'QA', 'Sales', 'Customer Success', 'Finance', 'HR',
+  'Marketing', 'IT', 'Management', 'Defence', 'Other',
+] as const;
+
+// Split a comma-joined department string into an array of trimmed names.
+function parseDepts(department: string): string[] {
+  return department.split(',').map(d => d.trim()).filter(Boolean);
+}
+
+// Derive support chart data from logs; a log touching N departments counts toward each.
 function buildSupportByDept(logs: SupportLog[]): { name: string; hours: number }[] {
   const map: Record<string, number> = {};
-  logs.forEach(l => { map[l.department] = (map[l.department] || 0) + l.hours; });
+  logs.forEach(l => {
+    parseDepts(l.department).forEach(dept => {
+      map[dept] = (map[dept] || 0) + l.hours;
+    });
+  });
   return Object.entries(map).sort((a, b) => b[1] - a[1]).map(([name, hours]) => ({ name, hours }));
 }
 
@@ -794,7 +809,7 @@ function EmployeePanel({ member, timeFilter, supportLogs, onClose }: {
   // Match by name for compatibility with both slug-id and email-id records
   const logs = filterLogsByTimeFilter(supportLogs, timeFilter).filter(l => l.employeeName === member.name);
   const hours = logs.reduce((s, l) => s + l.hours, 0);
-  const depts = Array.from(new Set(logs.map(l => l.department)));
+  const depts = Array.from(new Set(logs.flatMap(l => parseDepts(l.department))));
   const byDept = buildSupportByDept(logs);
 
   useEffect(() => {
@@ -850,7 +865,7 @@ function EmployeePanel({ member, timeFilter, supportLogs, onClose }: {
                           <div className="rec-name">{l.title}</div>
                           {l.notes && <div className="rec-notes">{l.notes}</div>}
                         </td>
-                        <td><span className="pill" style={{ fontSize: 11, padding: '2px 6px' }}>{l.department}</span></td>
+                        <td>{parseDepts(l.department).map(d => <span key={d} className="pill" style={{ fontSize: 11, padding: '2px 6px', marginRight: 3 }}>{d}</span>)}</td>
                         <td style={{ fontWeight: 700, color: 'var(--color-completed)', whiteSpace: 'nowrap' }}>{fmtHours(l.hours)}h</td>
                         <td><span className="small">{l.date}</span></td>
                       </tr>
@@ -876,7 +891,7 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
     // Match by name — works for both slug-id (legacy) and email-id (Supabase) records
     const logs = filtered.filter(l => l.employeeName === m.name);
     const hours = logs.reduce((s, l) => s + l.hours, 0);
-    const depts = Array.from(new Set(logs.map(l => l.department)));
+    const depts = Array.from(new Set(logs.flatMap(l => parseDepts(l.department))));
     const lastLog = logs[0];
     return { member: m, hours, activities: logs.length, depts, lastLog };
   }).filter(s => s.activities > 0);
@@ -884,7 +899,7 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
   const totalHours = filtered.reduce((s, l) => s + l.hours, 0);
   const totalActivities = filtered.length;
   const activeMembersCount = memberStats.length;
-  const deptCount = Array.from(new Set(filtered.map(l => l.department))).length;
+  const deptCount = Array.from(new Set(filtered.flatMap(l => parseDepts(l.department)))).length;
 
   return (
     <>
@@ -2384,7 +2399,7 @@ function SupportLogEditPanel({ log, onSave, onCancel }: {
   onSave: (patch: Partial<SupportLog>) => void;
   onCancel: () => void;
 }) {
-  const [department,  setDepartment]  = useState(log.department);
+  const [departments, setDepartments] = useState<string[]>(parseDepts(log.department));
   const [category,    setCategory]    = useState(log.category);
   const [title,       setTitle]       = useState(log.title);
   const [hours,       setHours]       = useState(String(log.hours));
@@ -2404,18 +2419,26 @@ function SupportLogEditPanel({ log, onSave, onCancel }: {
         console.error('Attachment upload failed:', err);
       }
     }
-    onSave({ department, category, title, hours: parseFloat(hours), date, week: getWeekTag(date), notes });
+    onSave({ department: departments.join(', '), category, title, hours: parseFloat(hours), date, week: getWeekTag(date), notes });
   };
+
+  const toggleDept = (d: string) =>
+    setDepartments(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
   return (
     <div className="card" style={{ border: '1px solid var(--color-accent)', marginBottom: 8 }}>
       <h2 className="section-title" style={{ fontSize: 14 }}>Edit Activity</h2>
       <div className="grid two">
-        <div>
-          <div className="kpi-label">Department</div>
-          <select className="input" value={department} onChange={e => setDepartment(e.target.value)}>
-            {['R&D','Product','Finance','Customer Success','Sales','Defence','Operations'].map(d => <option key={d}>{d}</option>)}
-          </select>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <div className="kpi-label">Departments Supported *</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', marginTop: 6 }}>
+            {SUPPORT_DEPARTMENTS.map(d => (
+              <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', color: departments.includes(d) ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+                <input type="checkbox" checked={departments.includes(d)} onChange={() => toggleDept(d)} style={{ accentColor: 'var(--color-accent)' }} />
+                {d}
+              </label>
+            ))}
+          </div>
         </div>
         <div>
           <div className="kpi-label">Category</div>
@@ -2829,7 +2852,7 @@ function Support({ timeFilter, supportLogs }: { timeFilter: TimeFilter; supportL
             </thead>
             <tbody>
               {byDept.map(({ name, hours }) => {
-                const activities = filtered.filter(l => l.department === name).length;
+                const activities = filtered.filter(l => parseDepts(l.department).includes(name)).length;
                 return (
                   <tr key={name}>
                     <td><b>{name}</b></td>
@@ -2987,7 +3010,7 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
                     <tr key={name}>
                       <td><b>{name}</b></td>
                       <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{fmtHours(hours)}h</td>
-                      <td>{filtered.filter(l => l.department === name).length}</td>
+                      <td>{filtered.filter(l => parseDepts(l.department).includes(name)).length}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -3131,7 +3154,7 @@ function AddWeeklyActivity({
   onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
 }) {
   const [employeeId,  setEmployeeId]  = useState('');
-  const [department,  setDepartment]  = useState('R&D');
+  const [departments, setDepartments] = useState<string[]>([]);
   const [category,    setCategory]    = useState<string>(ACTIVITY_CATEGORIES[0]);
   const [title,       setTitle]       = useState('');
   const [hours,       setHours]       = useState('');
@@ -3149,8 +3172,8 @@ function AddWeeklyActivity({
 
   const save = async () => {
     const member = activeTeamMembers.find(m => m.id === employeeId);
-    if (!member || !title.trim() || !hours || parseFloat(hours) <= 0) {
-      alert('Please fill in all required fields (Employee, Title, Hours).');
+    if (!member || !title.trim() || !hours || parseFloat(hours) <= 0 || departments.length === 0) {
+      alert('Please fill in all required fields (Employee, Department, Title, Hours).');
       return;
     }
     const logId = `LOG-${Date.now()}`;
@@ -3158,7 +3181,7 @@ function AddWeeklyActivity({
       id: logId,
       employeeId,
       employeeName: member.name,
-      department,
+      department: departments.join(', '),
       category,
       title,
       hours: parseFloat(hours),
@@ -3178,8 +3201,11 @@ function AddWeeklyActivity({
     }
     setRecent(prev => [log, ...prev]);
     setTitle(''); setHours(''); setNotes('');
-    setPendingFile(null);
+    setDepartments([]); setPendingFile(null);
   };
+
+  const toggleDept = (d: string) =>
+    setDepartments(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
 
   return (
     <>
@@ -3215,9 +3241,14 @@ function AddWeeklyActivity({
           </div>
           <div>
             <div className="kpi-label">Department Supported *</div>
-            <select className="input" value={department} onChange={e => setDepartment(e.target.value)}>
-              {['R&D','Product','Finance','Customer Success','Sales','Defence','Operations'].map(d => <option key={d}>{d}</option>)}
-            </select>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 16px', marginTop: 6 }}>
+              {SUPPORT_DEPARTMENTS.map(d => (
+                <label key={d} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', color: departments.includes(d) ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+                  <input type="checkbox" checked={departments.includes(d)} onChange={() => toggleDept(d)} style={{ accentColor: 'var(--color-accent)' }} />
+                  {d}
+                </label>
+              ))}
+            </div>
           </div>
           <div>
             <div className="kpi-label">Activity Type / Category</div>
@@ -3264,7 +3295,7 @@ function AddWeeklyActivity({
   const rows = [
     <tr key={l.id}>
       <td>{l.employeeName}</td>
-      <td>{l.department}</td>
+      <td>{parseDepts(l.department).map(d => <span key={d} className="pill" style={{ fontSize: 11, marginRight: 3 }}>{d}</span>)}</td>
       <td><b>{l.title}</b>{l.notes && <div className="small">{l.notes}</div>}</td>
       <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{fmtHours(l.hours)}h</td>
       <td>{l.date}</td>
