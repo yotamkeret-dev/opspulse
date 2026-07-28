@@ -124,12 +124,34 @@ const NETSUITE_REQUIRED_HEADERS = [
 ];
 
 /**
+ * Normalize a header string the same way the Excel parser does, so comparison
+ * is resilient against BOM, non-breaking spaces, and other Unicode whitespace.
+ */
+function normalizeHeader(h: string): string {
+  let out = '';
+  for (let i = 0; i < h.length; i++) {
+    const c = h.charCodeAt(i);
+    if (c === 0x200b || c === 0x200c || c === 0x200d ||
+        c === 0x200e || c === 0x200f || c === 0xfeff) continue;
+    if (c === 0x00a0 || (c >= 0x2000 && c <= 0x200a) ||
+        c === 0x202f || c === 0x205f || c === 0x2028 ||
+        c === 0x2029 || c === 0x3000) {
+      out += ' ';
+    } else {
+      out += h[i];
+    }
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+/**
  * Returns true if the given header list looks like a NetSuite PO export.
  * Requires the five headers that are unique to NetSuite and not in generic Oracle exports.
+ * Normalizes Unicode whitespace on both sides before comparing.
  */
 export function isNetSuiteExport(headers: string[]): boolean {
-  const set = new Set(headers.map(h => h.trim()));
-  return NETSUITE_REQUIRED_HEADERS.every(h => set.has(h));
+  const set = new Set(headers.map(normalizeHeader));
+  return NETSUITE_REQUIRED_HEADERS.every(h => set.has(normalizeHeader(h)));
 }
 
 /** NetSuite-specific columns that are preserved in notes even without a target field. */
@@ -196,8 +218,22 @@ export function mapOraclePORow(
     }
   }
 
-  // Append preserved NetSuite columns to notes (Qty Remaining, Expected Receipt Date, etc.)
+  // Build a structured item block for this row.
+  // Item and Description both target 'notes' in the column map, so only the
+  // last one processed survives the mapping loop. Read all three directly from
+  // raw to guarantee nothing is lost.
+  const rawItem = String(raw['Item'] ?? '').trim();
+  const rawDesc = String(raw['Description'] ?? '').trim();
+  const rawQty  = String(raw['Quantity'] ?? '').trim();
+  const itemLines: string[] = [];
+  if (rawItem) itemLines.push(`Item: ${rawItem}`);
+  if (rawDesc && rawDesc !== rawItem) itemLines.push(`Description: ${rawDesc}`);
+  if (rawQty)  itemLines.push(`Quantity: ${rawQty}`);
+
+  // Preserved metadata columns — compact single line.
+  // Quantity is already shown in the item block above; skip it here.
   const preservedLines = NETSUITE_PRESERVED_COLUMNS
+    .filter(({ key }) => key !== 'Quantity')
     .map(({ key, label }) => {
       const val = raw[key];
       return val !== null && val !== undefined && String(val).trim()
@@ -205,12 +241,12 @@ export function mapOraclePORow(
         : null;
     })
     .filter(Boolean) as string[];
-  if (preservedLines.length > 0) {
-    const preservedBlock = preservedLines.join(' · ');
-    data.notes = data.notes
-      ? `${data.notes}\n${preservedBlock}`
-      : preservedBlock;
-  }
+
+  // Assemble: structured item block first, then preserved metadata line
+  const noteParts: string[] = [];
+  if (itemLines.length > 0)     noteParts.push(itemLines.join('\n'));
+  if (preservedLines.length > 0) noteParts.push(preservedLines.join(' · '));
+  if (noteParts.length > 0)     data.notes = noteParts.join('\n');
 
   // Apply defaults for missing optional fields
   if (!data.category)  data.category  = 'PO Created';

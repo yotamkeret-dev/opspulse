@@ -1762,6 +1762,8 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
   const [importResult,setImportResult]= useState<{ success: number; skipped: number } | null>(null);
   const [error,       setError]       = useState<string | null>(null);
   const [dragOver,    setDragOver]    = useState(false);
+  const [debugHeaders,setDebugHeaders]= useState<string[]>([]);
+  const [netsuiteDetected, setNetsuiteDetected] = useState(false);
 
   // Load templates on mount
   useEffect(() => {
@@ -1800,7 +1802,10 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
       // If the file looks like a NetSuite export, apply the exact preset map
       // directly so all columns are pre-filled without fuzzy scoring.
       const headers = getHeaders(parsed.rows);
-      if (isNetSuiteExport(headers)) {
+      setDebugHeaders(headers);
+      const detected = isNetSuiteExport(headers);
+      setNetsuiteDetected(detected);
+      if (detected) {
         // Build a full map: preset for known headers, null (skip) for anything else.
         const exactMap: Record<string, string | null> = {};
         for (const h of headers) {
@@ -1960,6 +1965,19 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
             <>
               <div style={{ marginBottom: 14 }}>
                 <div className="section-title" style={{ marginBottom: 8 }}>Column Mapping</div>
+                {/* Debug panel — shows which headers were read and whether NetSuite was detected */}
+                <details style={{ marginBottom: 10, background: 'rgba(0,0,0,.3)', borderRadius: 6, padding: '6px 10px' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--color-muted)', userSelect: 'none' }}>
+                    {netsuiteDetected
+                      ? '✅ NetSuite preset detected — all columns auto-mapped'
+                      : `⚠️ NetSuite NOT detected — fuzzy mapping used (${debugHeaders.length} headers read)`}
+                  </summary>
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--color-muted)', fontFamily: 'monospace', lineHeight: 1.7 }}>
+                    {debugHeaders.map((h, i) => (
+                      <div key={i}>{i + 1}. &quot;{h}&quot;</div>
+                    ))}
+                  </div>
+                </details>
                 <div className="small" style={{ marginBottom: 12 }}>
                   Detected {colMatches.length} column{colMatches.length !== 1 ? 's' : ''}. Green = high confidence auto-mapped · Amber = fuzzy match · Red = low confidence · Grey = unmapped.
                 </div>
@@ -2362,40 +2380,51 @@ const normalizedDate =
       })()
     : m.data.date ?? new Date().toISOString().slice(0, 10);
     const rawAmount = m.data.originalAmount ?? m.data.amountUsd ?? 0;
-    const rawCurrency = String(rawRow.CURRENCY ?? rawRow.currency ?? m.data.originalCurrency ?? 'USD').toUpperCase().trim();
+
+    // m.rawData is the normalized raw Excel row — keys match the actual column
+    // headers after Unicode whitespace stripping. 'Currency' (capital C) is the
+    // exact NetSuite column name. rawRow.CURRENCY / rawRow.currency both miss it.
+    const rawCurrency = String(
+      m.rawData['Currency'] ??       // NetSuite exact name (post-normalization)
+      m.rawData['CURRENCY'] ??       // Oracle/generic ERP uppercase
+      m.rawData['currency'] ??       // lowercase variant
+      m.data.originalCurrency ??     // set by column map if wired correctly
+      'USD'
+    ).toUpperCase().trim();
+
     let convertedAmountUsd = rawAmount;
+    let convertedRate: number | undefined     = rawCurrency === 'USD' ? 1        : undefined;
+    let convertedRateDate: string | undefined = rawCurrency === 'USD' ? new Date().toISOString().slice(0, 10) : undefined;
 
-let convertedRate: number | undefined =
-  rawCurrency === 'USD' ? 1 : undefined;
-
-let convertedRateDate: string | undefined =
-  rawCurrency === 'USD'
-    ? new Date().toISOString().slice(0, 10)
-    : undefined;
-if (rawAmount > 0 && rawCurrency !== 'USD') {
-  const conv = await convertToUsd(rawAmount, rawCurrency);
-  convertedAmountUsd = conv.usdAmount;
-  convertedRate = conv.exchangeRate;
-  convertedRateDate = conv.exchangeRateDate;
-}
+    if (rawAmount > 0 && rawCurrency !== 'USD') {
+      const conv = await convertToUsd(rawAmount, rawCurrency);
+      convertedAmountUsd = conv.usdAmount;
+      convertedRate      = conv.exchangeRate;
+      convertedRateDate  = conv.exchangeRateDate;
+      console.log(
+        `[import] currency conversion: ${rawAmount} ${rawCurrency}` +
+        ` → $${convertedAmountUsd} USD (rate ${convertedRate}, fallback=${conv.isFallback})`
+      );
+    }
       const record: ProcurementRecord = {
         id:               m.id,
         employeeId:       finalEmployeeId,
         employeeName:     finalEmployeeName,
         poNumber:         m.data.poNumber  ?? '',
         supplier:         m.data.supplier  ?? '',
-amountUsd: convertedAmountUsd,       
-category: m.data.category ?? 'PO Created',
-status: normalizeProcurementStatus(m.data.status),
-notes: [
-  needsReview ? '[NEEDS REVIEW]' : '',
-  mergeSummary ?? '',
-  m.data.notes ?? '',
-].filter(Boolean).join('\n\n'),
-date: normalizedDate,
-originalCurrency: rawCurrency,
-exchangeRate: convertedRate,
-exchangeRateDate: convertedRateDate,
+        amountUsd:        convertedAmountUsd,
+        originalAmount:   rawAmount,          // always the pre-conversion value in rawCurrency
+        originalCurrency: rawCurrency,
+        exchangeRate:     convertedRate,
+        exchangeRateDate: convertedRateDate,
+        category:         m.data.category ?? 'PO Created',
+        status:           normalizeProcurementStatus(m.data.status),
+        notes: [
+          needsReview ? '[NEEDS REVIEW]' : '',
+          mergeSummary ?? '',
+          m.data.notes ?? '',
+        ].filter(Boolean).join('\n\n'),
+        date:             normalizedDate,
         createdBy:        authUserEmail ?? undefined,
       };
 
