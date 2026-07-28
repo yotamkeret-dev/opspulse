@@ -6,21 +6,33 @@ export const ORACLE_PO_RULES: FieldMappingRule[] = [
   {
     targetField:    'poNumber',
     label:          'PO Number',
-    sourcePatterns: ['PO_NUMBER','PO Number','Purchase Order Number','Order Number','PO NO','PO#','PO No','Order No'],
+    sourcePatterns: [
+      'PO_NUMBER','PO Number','Purchase Order Number','Order Number','PO NO','PO#','PO No','Order No',
+      // NetSuite exact headers
+      'Document Number','Document No','Document #',
+    ],
     required:       true,
     aiHint:         'Unique purchase order identifier, e.g. PO-4701',
   },
   {
     targetField:    'supplier',
     label:          'Supplier',
-    sourcePatterns: ['SUPPLIER','VENDOR','VENDOR_NAME','Vendor Name','Supplier Name','Bill To','Vendor'],
+    sourcePatterns: [
+      'SUPPLIER','VENDOR','VENDOR_NAME','Vendor Name','Supplier Name','Bill To','Vendor',
+      // NetSuite exact headers
+      'Vendor','Name',
+    ],
     required:       true,
     aiHint:         'Supplier or vendor company name',
   },
   {
     targetField:    'date',
     label:          'PO Date',
-    sourcePatterns: ['PO_DATE','PO Date','Order Date','ORDERED_DATE','Creation Date','Date','Issue Date'],
+    sourcePatterns: [
+      'PO_DATE','PO Date','Order Date','ORDERED_DATE','Creation Date','Date','Issue Date',
+      // NetSuite exact headers
+      'Date',
+    ],
     required:       false,
     transform:      normaliseDate,
     defaultValue:   () => new Date().toISOString().slice(0, 10),
@@ -29,16 +41,24 @@ export const ORACLE_PO_RULES: FieldMappingRule[] = [
   {
     targetField:    'amountUsd',
     label:          'Total Amount',
-    sourcePatterns: ['TOTAL','Grand Total','AMOUNT','Total Amount','PO Amount','Net Amount','Order Total'],
+    sourcePatterns: [
+      'TOTAL','Grand Total','AMOUNT','Total Amount','PO Amount','Net Amount','Order Total',
+      // NetSuite exact headers (foreign-currency amount column)
+      'Amount (Foreign Currency)','Amount Foreign Currency','Foreign Amount','Foreign Currency Amount',
+    ],
     required:       false,
     transform:      parseAmount,
     defaultValue:   0,
-    aiHint:         'Total monetary value of the PO in USD',
+    aiHint:         'Total monetary value of the PO in the original currency',
   },
   {
     targetField:    'status',
     label:          'Status',
-    sourcePatterns: ['STATUS','PO Status','State','Order Status'],
+    sourcePatterns: [
+      'STATUS','PO Status','State','Order Status',
+      // NetSuite exact header
+      'Status',
+    ],
     required:       false,
     transform:      normaliseStatus,
     defaultValue:   'Open' as const,
@@ -53,8 +73,12 @@ export const ORACLE_PO_RULES: FieldMappingRule[] = [
   },
   {
     targetField:    'notes',
-    label:          'Notes / Line Items',
-    sourcePatterns: ['DESCRIPTION','Notes','Comments','Item Description','LINE_ITEMS','Items'],
+    label:          'Notes / Description',
+    sourcePatterns: [
+      'DESCRIPTION','Notes','Comments','Item Description','LINE_ITEMS','Items',
+      // NetSuite exact headers (both map to notes — item details appended together)
+      'Description','Item',
+    ],
     required:       false,
     transform:      formatNotes,
     defaultValue:   '',
@@ -64,6 +88,61 @@ export const ORACLE_PO_RULES: FieldMappingRule[] = [
 
 /** ID used when seeding the Oracle PO default template into Supabase. */
 export const ORACLE_PO_TEMPLATE_ID = 'oracle-po-v1';
+
+/**
+ * Exact column→field map for NetSuite PO export headers.
+ * When ALL of these headers are present in the uploaded file,
+ * this map is applied directly (no fuzzy scoring needed).
+ */
+export const NETSUITE_PO_EXACT_MAP: Record<string, string | null> = {
+  'Document Number':             'poNumber',
+  'Vendor':                      'supplier',
+  'Date':                        'date',
+  'Amount (Foreign Currency)':   'amountUsd',
+  'Currency':                    'originalCurrency',
+  'Status':                      'status',
+  'Description':                 'notes',
+  'Item':                        'notes',
+  // Preserved in raw data + appended to notes — no dedicated field
+  'Internal ID':                 null,
+  'Memo (Main)':                 null,
+  'Quantity':                    null,
+  'Quantity Fulfilled/Received': null,
+  'Quantity Remaining':          null,
+  'Expected Receipt Date':       null,
+  'Vessel SO':                   null,
+  'Created From':                null,
+};
+
+/** Headers that must all be present for the NetSuite preset to activate. */
+const NETSUITE_REQUIRED_HEADERS = [
+  'Document Number',
+  'Vendor',
+  'Amount (Foreign Currency)',
+  'Currency',
+  'Expected Receipt Date',
+];
+
+/**
+ * Returns true if the given header list looks like a NetSuite PO export.
+ * Requires the five headers that are unique to NetSuite and not in generic Oracle exports.
+ */
+export function isNetSuiteExport(headers: string[]): boolean {
+  const set = new Set(headers.map(h => h.trim()));
+  return NETSUITE_REQUIRED_HEADERS.every(h => set.has(h));
+}
+
+/** NetSuite-specific columns that are preserved in notes even without a target field. */
+const NETSUITE_PRESERVED_COLUMNS: { key: string; label: string }[] = [
+  { key: 'Internal ID',                 label: 'Internal ID'           },
+  { key: 'Memo (Main)',                 label: 'Memo'                  },
+  { key: 'Quantity',                    label: 'Quantity'              },
+  { key: 'Quantity Fulfilled/Received', label: 'Qty Fulfilled'        },
+  { key: 'Quantity Remaining',          label: 'Qty Remaining'         },
+  { key: 'Expected Receipt Date',       label: 'Expected Receipt Date' },
+  { key: 'Vessel SO',                   label: 'Vessel SO'             },
+  { key: 'Created From',                label: 'Created From'          },
+];
 
 // ─── Row mapper ────────────────────────────────────────────────────────────
 
@@ -115,6 +194,22 @@ export function mapOraclePORow(
         reason: `Could not match "${rawName}" to a team member — please assign manually`,
       });
     }
+  }
+
+  // Append preserved NetSuite columns to notes (Qty Remaining, Expected Receipt Date, etc.)
+  const preservedLines = NETSUITE_PRESERVED_COLUMNS
+    .map(({ key, label }) => {
+      const val = raw[key];
+      return val !== null && val !== undefined && String(val).trim()
+        ? `${label}: ${String(val).trim()}`
+        : null;
+    })
+    .filter(Boolean) as string[];
+  if (preservedLines.length > 0) {
+    const preservedBlock = preservedLines.join(' · ');
+    data.notes = data.notes
+      ? `${data.notes}\n${preservedBlock}`
+      : preservedBlock;
   }
 
   // Apply defaults for missing optional fields

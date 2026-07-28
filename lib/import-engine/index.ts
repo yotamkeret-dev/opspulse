@@ -12,7 +12,8 @@ export { parseCSV }               from './parsers/csv';
 export { parseExcel }             from './parsers/excel';
 export { parsePDF }               from './parsers/pdf';
 export { detectColumnMappings, columnMatchesToMap } from './mappers/base-mapper';
-export { ORACLE_PO_RULES, mapOraclePORow, matchEmployee, ORACLE_PO_TEMPLATE_ID } from './mappers/oracle-po';
+export { ORACLE_PO_RULES, mapOraclePORow, matchEmployee, ORACLE_PO_TEMPLATE_ID,
+         NETSUITE_PO_EXACT_MAP, isNetSuiteExport } from './mappers/oracle-po';
 export { fetchTemplates, saveTemplate, deleteTemplate, ORACLE_PO_DEFAULT_TEMPLATE } from './templates';
 export type {
   RawRow,

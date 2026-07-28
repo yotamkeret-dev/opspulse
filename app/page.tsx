@@ -6,7 +6,7 @@ import { isAdmin } from '@/lib/approved-members';
 import { convertToUsd, currencySymbol, SUPPORTED_CURRENCIES } from '@/lib/exchange-rate';
 import {
   parseFile, getHeaders, detectColumnMappings, columnMatchesToMap,
-  mapOraclePORow, ORACLE_PO_RULES,
+  mapOraclePORow, ORACLE_PO_RULES, NETSUITE_PO_EXACT_MAP, isNetSuiteExport,
   fetchTemplates, saveTemplate, deleteTemplate, ORACLE_PO_DEFAULT_TEMPLATE,
   type RawRow, type MappedRecord, type ColumnMatch, type MappingTemplate,
 } from '@/lib/import-engine';
@@ -291,7 +291,79 @@ async function updateSupportLogInDB(id: string, patch: Partial<SupportLog>): Pro
   if (error) throw new Error(error.message);
 }
 
-async function updateProcurementInDB(id: string, patch: Partial<ProcurementRecord>): Promise<void> {
+// Fields tracked for change history — label shown in the history panel.
+const TRACKED_FIELDS: { key: keyof ProcurementRecord; label: string; format?: (v: unknown) => string }[] = [
+  { key: 'status',    label: 'Status' },
+  { key: 'amountUsd', label: 'Amount (USD)', format: v => `$${Number(v).toLocaleString()}` },
+  { key: 'notes',     label: 'Notes' },
+  { key: 'date',      label: 'Date' },
+  { key: 'category',  label: 'Category' },
+  { key: 'supplier',  label: 'Supplier' },
+  { key: 'poNumber',  label: 'PO Number' },
+];
+
+type ProcurementHistoryEntry = {
+  id: string;
+  recordId: string;
+  changedAt: string;
+  changedBy: string;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+};
+
+async function insertProcurementHistoryRows(
+  recordId: string,
+  oldRecord: ProcurementRecord,
+  patch: Partial<ProcurementRecord>,
+  changedBy: string,
+): Promise<void> {
+  const supabase = createClient();
+  const rows: {
+    record_id: string; changed_by: string; field_name: string; old_value: string | null; new_value: string | null;
+  }[] = [];
+
+  for (const { key, label, format } of TRACKED_FIELDS) {
+    const oldVal = oldRecord[key];
+    const newVal = patch[key];
+    if (newVal === undefined) continue;
+    const fmt = format ?? String;
+    const oldStr = oldVal != null ? fmt(oldVal) : null;
+    const newStr = newVal != null ? fmt(newVal) : null;
+    if (oldStr === newStr) continue;
+    rows.push({ record_id: recordId, changed_by: changedBy, field_name: label, old_value: oldStr, new_value: newStr });
+  }
+
+  if (rows.length === 0) return;
+  const { error } = await supabase.from('procurement_history').insert(rows);
+  if (error) console.error('history insert:', error.message);
+}
+
+async function fetchProcurementHistory(recordId: string): Promise<ProcurementHistoryEntry[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('procurement_history')
+    .select('*')
+    .eq('record_id', recordId)
+    .order('changed_at', { ascending: false });
+  if (error) { console.error('fetchHistory:', error.message); return []; }
+  return (data ?? []).map(row => ({
+    id:        String(row.id),
+    recordId:  String(row.record_id),
+    changedAt: String(row.changed_at),
+    changedBy: String(row.changed_by ?? ''),
+    fieldName: String(row.field_name),
+    oldValue:  row.old_value  != null ? String(row.old_value)  : null,
+    newValue:  row.new_value  != null ? String(row.new_value)  : null,
+  }));
+}
+
+async function updateProcurementInDB(
+  id: string,
+  patch: Partial<ProcurementRecord>,
+  oldRecord?: ProcurementRecord,
+  changedBy?: string,
+): Promise<void> {
   const supabase = createClient();
   const { error } = await supabase
     .from('procurement_records')
@@ -303,12 +375,15 @@ async function updateProcurementInDB(id: string, patch: Partial<ProcurementRecor
       status:        patch.status,
       notes:         patch.notes,
       activity_date:
-  patch.date && /^\d{4}-\d{2}-\d{2}$/.test(patch.date)
-    ? patch.date
-    : new Date().toISOString().slice(0, 10),
+        patch.date && /^\d{4}-\d{2}-\d{2}$/.test(patch.date)
+          ? patch.date
+          : new Date().toISOString().slice(0, 10),
     })
     .eq('id', id);
   if (error) throw new Error(error.message);
+  if (oldRecord && changedBy) {
+    await insertProcurementHistoryRows(id, oldRecord, patch, changedBy);
+  }
 }
 
 async function updateOperationsInDB(id: string, patch: Partial<OperationsRecord>): Promise<void> {
@@ -1721,11 +1796,29 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
       setSheets(parsed.sheets ?? []);
       setSourceType(parsed.sourceType);
 
-      // Auto-detect column mappings
+      // Auto-detect column mappings.
+      // If the file looks like a NetSuite export, apply the exact preset map
+      // directly so all columns are pre-filled without fuzzy scoring.
       const headers = getHeaders(parsed.rows);
-      const matches = detectColumnMappings(headers, ORACLE_PO_RULES);
-      setColMatches(matches);
-      setColumnMap(columnMatchesToMap(matches));
+      if (isNetSuiteExport(headers)) {
+        // Build a full map: preset for known headers, null (skip) for anything else.
+        const exactMap: Record<string, string | null> = {};
+        for (const h of headers) {
+          exactMap[h] = NETSUITE_PO_EXACT_MAP[h] ?? null;
+        }
+        // Derive colMatches from the exact map so the UI dots show green.
+        const exactMatches: ColumnMatch[] = headers.map(h => ({
+          sourceColumn: h,
+          targetField:  exactMap[h],
+          confidence:   exactMap[h] !== undefined ? 'high' : 'unmapped',
+        }));
+        setColMatches(exactMatches);
+        setColumnMap(exactMap);
+      } else {
+        const matches = detectColumnMappings(headers, ORACLE_PO_RULES);
+        setColMatches(matches);
+        setColumnMap(columnMatchesToMap(matches));
+      }
 
       setStep(parsed.sourceType === 'pdf' ? 'preview' : 'mapping');
     } catch (err) {
@@ -1786,14 +1879,15 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
 
   // ── TARGET_FIELDS dropdown options ────────────────────────────────────────
   const TARGET_FIELDS = [
-    { value:'',              label:'— skip —' },
-    { value:'poNumber',      label:'PO Number' },
-    { value:'supplier',      label:'Supplier' },
-    { value:'date',          label:'PO Date' },
-    { value:'amountUsd',     label:'Total Amount (USD)' },
-    { value:'status',        label:'Status' },
-    { value:'employeeName',  label:'Requester / Owner' },
-    { value:'notes',         label:'Notes / Description' },
+    { value:'',                 label:'— skip —' },
+    { value:'poNumber',         label:'PO Number' },
+    { value:'supplier',         label:'Supplier' },
+    { value:'date',             label:'PO Date' },
+    { value:'amountUsd',        label:'Total Amount (USD)' },
+    { value:'originalCurrency', label:'Currency' },
+    { value:'status',           label:'Status' },
+    { value:'employeeName',     label:'Requester / Owner' },
+    { value:'notes',            label:'Notes / Description' },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -2042,6 +2136,64 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
   );
 }
 
+// ─── Procurement History Panel ─────────────────────────────────────────────
+
+function ProcurementHistoryRow({ recordId, onClose }: { recordId: string; onClose: () => void }) {
+  const [entries, setEntries] = useState<ProcurementHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (DEMO_MODE) { setLoading(false); return; }
+    fetchProcurementHistory(recordId)
+      .then(rows => { setEntries(rows); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [recordId]);
+
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
+           ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div style={{ padding: '14px 18px', background: 'rgba(91,141,238,.05)', borderTop: '1px solid rgba(255,255,255,.07)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-accent)' }}>Change History</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--color-muted)', fontSize: 13, cursor: 'pointer', padding: 0 }}>✕ Close</button>
+      </div>
+      {DEMO_MODE && <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>Change history requires production mode.</div>}
+      {!DEMO_MODE && loading && <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>Loading…</div>}
+      {!DEMO_MODE && !loading && entries.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>No changes recorded yet.</div>
+      )}
+      {!DEMO_MODE && !loading && entries.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ color: 'var(--color-muted)' }}>
+              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>When</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>By</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>Field</th>
+              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>From</th>
+              <th style={{ textAlign: 'left', padding: '4px 0 8px 0',   fontWeight: 600 }}>To</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(e => (
+              <tr key={e.id} style={{ borderTop: '1px solid rgba(255,255,255,.05)' }}>
+                <td style={{ padding: '5px 8px 5px 0', color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>{fmt(e.changedAt)}</td>
+                <td style={{ padding: '5px 8px 5px 0', color: 'var(--color-muted)' }}>{e.changedBy || '—'}</td>
+                <td style={{ padding: '5px 8px 5px 0', fontWeight: 600, color: '#e8eef7' }}>{e.fieldName}</td>
+                <td style={{ padding: '5px 8px 5px 0', color: 'var(--color-danger)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.oldValue ?? '—'}</td>
+                <td style={{ padding: '5px 0 5px 0',  color: 'var(--color-completed)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.newValue ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 // ─── Procurement Page ──────────────────────────────────────────────────────
 
 function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUserId, onRecordAdded, onRecordDeleted }: {
@@ -2058,6 +2210,7 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
   const [showForm,     setShowForm]     = useState(false);
   const [showImport,   setShowImport]   = useState(false);
   const [editingId,    setEditingId]    = useState<string | null>(null);
+  const [historyId,    setHistoryId]    = useState<string | null>(null);
   const [saveErr,      setSaveErr]      = useState('');
   const [deletingRecord, setDeletingRecord] = useState<ProcurementRecord | null>(null);
 
@@ -2108,7 +2261,8 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
 
   const handleEdit = async (id: string, patch: Partial<ProcurementRecord>) => {
     try {
-      if (!DEMO_MODE) await updateProcurementInDB(id, patch);
+      const oldRecord = records.find(r => r.id === id);
+      if (!DEMO_MODE) await updateProcurementInDB(id, patch, oldRecord, authUserEmail ?? undefined);
       setRecords(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
       setEditingId(null);
     } catch (err) {
@@ -2118,9 +2272,76 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
 
   // Bulk import: inserts each mapped record + creates a support_log for Activity Feed
   const handleBulkImport = async (mapped: MappedRecord<ProcurementRecord>[]) => {
+    // Helper: extract a short item/description name from a raw import row.
+    function extractImportItemName(rawData: Record<string, string | number | null>): string {
+      const candidates = [
+        'DESCRIPTION', 'description', 'ITEM_DESCRIPTION', 'Item Description',
+        'ITEM', 'item', 'ITEM_NUM', 'ITEM_NUMBER', 'Item Number',
+        'LINE_ITEMS', 'Items', 'Notes', 'Comments',
+      ];
+      for (const key of candidates) {
+        const val = rawData[key];
+        if (val && String(val).trim()) return String(val).trim().slice(0, 80);
+      }
+      return '';
+    }
     const defaultEmployee = activeTeamMembers.find(m => m.id === authUserEmail);
-    for (let i = 0; i < mapped.length; i++) {
-      const m = mapped[i];
+
+    // Group by PO number so multi-row POs are merged into one record.
+    // Rows without a PO number are never merged (each gets a unique key).
+    type ImportGroup = { members: MappedRecord<ProcurementRecord>[]; indices: number[] };
+    const groupMap = new Map<string, ImportGroup>();
+    mapped.forEach((m, i) => {
+      const poKey = m.data.poNumber?.trim() ? m.data.poNumber.trim().toUpperCase() : `__NO_PO_${i}__`;
+      if (!groupMap.has(poKey)) groupMap.set(poKey, { members: [], indices: [] });
+      groupMap.get(poKey)!.members.push(m);
+      groupMap.get(poKey)!.indices.push(i);
+    });
+
+    // Flatten groups into a merged list; multi-row groups become one record.
+    const mergedMapped: Array<{ m: MappedRecord<ProcurementRecord>; i: number; mergeSummary: string | null }> = [];
+    for (const { members, indices } of groupMap.values()) {
+      if (members.length === 1) {
+        mergedMapped.push({ m: members[0], i: indices[0], mergeSummary: null });
+      } else {
+        // Merge: use first member as base, sum amounts, collect item names.
+        const base = members[0];
+        const totalAmount = members.reduce((s, mr) => s + (mr.data.amountUsd ?? 0), 0);
+        const rowNums = indices.map(idx => idx + 2); // row 1 = header
+        const itemNames = members.map(mr => extractImportItemName(mr.rawData)).filter(Boolean);
+        const mergeSummary = [
+          `Import Merge Summary:`,
+          `  • ${members.length} Excel rows merged`,
+          `  • Rows: ${rowNums.join(', ')}`,
+          itemNames.length > 0 ? `  • Items: ${itemNames.join(', ')}` : null,
+          `  • Combined amount: $${totalAmount.toLocaleString()}`,
+          ``,
+          `---`,
+          ``,
+          ...members.map((mr, gi) => {
+            const rn = indices[gi] + 2;
+            const item = extractImportItemName(mr.rawData);
+            const amt  = mr.data.amountUsd ?? 0;
+            const note = mr.data.notes ?? '';
+            return [
+              `Row ${rn}${item ? ` — ${item}` : ''}${amt > 0 ? ` — $${amt.toLocaleString()}` : ''}`,
+              note ? `  ${note}` : '',
+            ].filter(Boolean).join('\n');
+          }),
+        ].filter(s => s !== null).join('\n');
+
+        // Patch the base member with merged amount + notes placeholder
+        const merged: MappedRecord<ProcurementRecord> = {
+          ...base,
+          data: { ...base.data, amountUsd: totalAmount },
+          // mark as needs_review if any member needs review
+          status: members.some(mr => mr.status === 'needs_review') ? 'needs_review' : base.status,
+        };
+        mergedMapped.push({ m: merged, i: indices[0], mergeSummary });
+      }
+    }
+
+    for (const { m, i, mergeSummary } of mergedMapped) {
       const finalEmployeeId   = m.data.employeeId   ?? authUserEmail ?? '';
       const finalEmployeeName = m.data.employeeName ?? defaultEmployee?.name ?? 'Operations Team';
       const needsReview       = m.status === 'needs_review';
@@ -2141,10 +2362,8 @@ const normalizedDate =
       })()
     : m.data.date ?? new Date().toISOString().slice(0, 10);
     const rawAmount = m.data.originalAmount ?? m.data.amountUsd ?? 0;
-const rawCurrency = String(rawRow.CURRENCY ?? rawRow.currency ?? m.data.originalCurrency ?? 'USD').toUpperCase().trim();console.log('DATA', m.data);
-
-
-let convertedAmountUsd = rawAmount;
+    const rawCurrency = String(rawRow.CURRENCY ?? rawRow.currency ?? m.data.originalCurrency ?? 'USD').toUpperCase().trim();
+    let convertedAmountUsd = rawAmount;
 
 let convertedRate: number | undefined =
   rawCurrency === 'USD' ? 1 : undefined;
@@ -2168,7 +2387,11 @@ if (rawAmount > 0 && rawCurrency !== 'USD') {
 amountUsd: convertedAmountUsd,       
 category: m.data.category ?? 'PO Created',
 status: normalizeProcurementStatus(m.data.status),
-notes: (needsReview ? '[NEEDS REVIEW] ' : '') + (m.data.notes ?? ''),
+notes: [
+  needsReview ? '[NEEDS REVIEW]' : '',
+  mergeSummary ?? '',
+  m.data.notes ?? '',
+].filter(Boolean).join('\n\n'),
 date: normalizedDate,
 originalCurrency: rawCurrency,
 exchangeRate: convertedRate,
@@ -2177,66 +2400,154 @@ exchangeRateDate: convertedRateDate,
       };
 
       if (!DEMO_MODE) {
-        // Store raw import metadata alongside the record
-        const rawImport = { ...m.rawImport, extractedRows: undefined }; // trim for size
         const supabase = createClient();
         const activityDate = record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
           ? record.date
           : new Date().toISOString().slice(0, 10);
-        const { data: inserted, error } = await supabase
-          .from('procurement_records')
-          .insert({
-            id:                record.id,
-            employee_id:       record.employeeId,
-            employee_name:     record.employeeName,
-            po_number:         record.poNumber || null,
-            supplier:          record.supplier,
-            amount_usd:        record.amountUsd || null,
-            category:          record.category,
-            status:            normalizeProcurementStatus(record.status),
-            notes:             record.notes,
-            activity_date:     activityDate,
-            raw_import:        rawImport,
-            original_amount:   record.originalAmount   ?? record.amountUsd ?? null,
-            original_currency: record.originalCurrency ?? 'USD',
-            exchange_rate:     record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
-            exchange_rate_date: record.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(record.exchangeRateDate)
-              ? record.exchangeRateDate
-              : new Date().toISOString().slice(0, 10),
-            created_by:        record.createdBy ?? null,
-          })
-          .select('id');
-        if (error) {
-          console.error(`import insert [${i}] ${record.poNumber || record.supplier}:`, error.message, error.details);
-          continue;
-        }
-        if (!inserted || inserted.length === 0) {
-          console.error(`import insert [${i}]: row was silently rejected (RLS?)`);
-          continue;
-        }
-        onRecordAdded?.(record);
+        const rawImport = { ...m.rawImport, extractedRows: undefined };
 
-        // Create support_log so imported PO appears in Activity Feed + Team Last Updates
-        if (authUserId) {
-          const summaryTitle =
-            `PO imported: ${record.poNumber || 'N/A'} — ${record.supplier} — $${(record.amountUsd || 0).toLocaleString()}`;
-          const logEntry: SupportLog = {
-            id:           `LOG-import-${record.id}`,
-            employeeId:   finalEmployeeId,
-            employeeName: finalEmployeeName,
-            department:   'Operations',
-            category:     'Procurement',
-            title:        summaryTitle,
-            hours:        0.1,
-            date:         activityDate,
-            week:         getWeekTag(activityDate),
-            notes:        `Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
+        // ── UPSERT: look for an existing non-deleted record with this PO number ──
+        let existingRecord: ProcurementRecord | null = null;
+        if (record.poNumber.trim()) {
+          const { data: existingRow } = await supabase
+            .from('procurement_records')
+            .select('*')
+            .eq('po_number', record.poNumber.trim())
+            .is('deleted_at', null)
+            .maybeSingle();
+          if (existingRow) existingRecord = rowToProcurementRecord(existingRow);
+        }
+
+        if (existingRecord) {
+          // ── UPDATE path: preserve existing ID, write history ──────────────────
+          const patch: Partial<ProcurementRecord> = {
+            status:           record.status,
+            amountUsd:        record.amountUsd,
+            notes:            record.notes,
+            date:             activityDate,
+            category:         record.category,
+            supplier:         record.supplier,
+            originalAmount:   record.originalAmount   ?? record.amountUsd,
+            originalCurrency: record.originalCurrency ?? 'USD',
+            exchangeRate:     record.exchangeRate,
+            exchangeRateDate: record.exchangeRateDate,
           };
-          await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
-        }
-      }
 
-      setRecords(prev => [...prev, record]);
+          const { error: updErr } = await supabase
+            .from('procurement_records')
+            .update({
+              status:             normalizeProcurementStatus(patch.status),
+              amount_usd:         patch.amountUsd ?? null,
+              notes:              patch.notes,
+              activity_date:      activityDate,
+              category:           patch.category,
+              supplier:           patch.supplier,
+              original_amount:    patch.originalAmount   ?? patch.amountUsd ?? null,
+              original_currency:  patch.originalCurrency ?? 'USD',
+              exchange_rate:      patch.exchangeRate      ?? null,
+              exchange_rate_date: patch.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(patch.exchangeRateDate)
+                ? patch.exchangeRateDate
+                : new Date().toISOString().slice(0, 10),
+              raw_import:         rawImport,
+            })
+            .eq('id', existingRecord.id);
+
+          if (updErr) {
+            console.error(`import upsert update [${record.poNumber}]:`, updErr.message);
+            continue;
+          }
+
+          // Write change history for anything that actually changed
+          await insertProcurementHistoryRows(
+            existingRecord.id, existingRecord, patch, authUserEmail ?? 'import'
+          );
+
+          // Reflect in local state using the EXISTING id
+          const updated = { ...existingRecord, ...patch, id: existingRecord.id };
+          setRecords(prev => {
+            const exists = prev.some(r => r.id === existingRecord!.id);
+            return exists
+              ? prev.map(r => r.id === existingRecord!.id ? updated : r)
+              : [...prev, updated];
+          });
+
+          // Activity log: note it was an update, not a create
+          if (authUserId) {
+            const summaryTitle = `PO updated via import: ${record.poNumber} — ${record.supplier} — $${(record.amountUsd || 0).toLocaleString()}`;
+            const logEntry: SupportLog = {
+              id:           `LOG-import-upd-${existingRecord.id}-${Date.now()}`,
+              employeeId:   finalEmployeeId,
+              employeeName: finalEmployeeName,
+              department:   'Operations',
+              category:     'Procurement',
+              title:        summaryTitle,
+              hours:        0.1,
+              date:         activityDate,
+              week:         getWeekTag(activityDate),
+              notes:        `Updated via import · Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
+            };
+            await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
+          }
+        } else {
+          // ── INSERT path: new record ────────────────────────────────────────────
+          const { data: inserted, error } = await supabase
+            .from('procurement_records')
+            .insert({
+              id:                record.id,
+              employee_id:       record.employeeId,
+              employee_name:     record.employeeName,
+              po_number:         record.poNumber || null,
+              supplier:          record.supplier,
+              amount_usd:        record.amountUsd || null,
+              category:          record.category,
+              status:            normalizeProcurementStatus(record.status),
+              notes:             record.notes,
+              activity_date:     activityDate,
+              raw_import:        rawImport,
+              original_amount:   record.originalAmount   ?? record.amountUsd ?? null,
+              original_currency: record.originalCurrency ?? 'USD',
+              exchange_rate:     record.exchangeRate      ?? (record.originalCurrency === 'USD' || !record.originalCurrency ? 1 : null),
+              exchange_rate_date: record.exchangeRateDate && /^\d{4}-\d{2}-\d{2}$/.test(record.exchangeRateDate)
+                ? record.exchangeRateDate
+                : new Date().toISOString().slice(0, 10),
+              created_by:        record.createdBy ?? null,
+            })
+            .select('id');
+
+          if (error) {
+            console.error(`import insert [${i}] ${record.poNumber || record.supplier}:`, error.message, error.details);
+            continue;
+          }
+          if (!inserted || inserted.length === 0) {
+            console.error(`import insert [${i}]: row was silently rejected (RLS?)`);
+            continue;
+          }
+          onRecordAdded?.(record);
+
+          // Activity log
+          if (authUserId) {
+            const summaryTitle = `PO imported: ${record.poNumber || 'N/A'} — ${record.supplier} — $${(record.amountUsd || 0).toLocaleString()}`;
+            const logEntry: SupportLog = {
+              id:           `LOG-import-${record.id}`,
+              employeeId:   finalEmployeeId,
+              employeeName: finalEmployeeName,
+              department:   'Operations',
+              category:     'Procurement',
+              title:        summaryTitle,
+              hours:        0.1,
+              date:         activityDate,
+              week:         getWeekTag(activityDate),
+              notes:        `Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
+            };
+            await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
+          }
+
+          setRecords(prev => [...prev, record]);
+        }
+      } else {
+        // DEMO_MODE: just add to local state
+        setRecords(prev => [...prev, record]);
+      }
     }
 
     // Refresh records from DB so the table reflects any date-based filtering correctly.
@@ -2333,30 +2644,42 @@ exchangeRateDate: convertedRateDate,
           <h2 className="section-title">All Records</h2>
           <table className="table">
             <thead>
-              <tr><th>Category</th><th>PO Number</th><th>Supplier</th><th>Amount</th><th>Owner</th><th>Date</th><th>Status</th></tr>
+              <tr><th>Category</th><th>PO Number</th><th>Supplier</th><th>Amount</th><th>Owner</th><th>Date</th><th>Status</th><th></th></tr>
             </thead>
             <tbody>
               {records.flatMap(r => {
+                const isEditing = editingId === r.id;
+                const isHistory = historyId === r.id;
                 const rows = [
                   <tr key={r.id}>
                     <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
                     <td><span className="rec-id">{r.poNumber || '—'}</span></td>
-                    <td><b>{r.supplier}</b>{r.notes && <div className="small">{r.notes}</div>}</td>
+                    <td><b>{r.supplier}</b>{r.notes && <div className="small" style={{ whiteSpace: 'pre-line', maxWidth: 320 }}>{r.notes}</div>}</td>
                     <td><MoneyCell record={r} /></td>
                     <td>{r.employeeName}</td>
                     <td>{r.date}</td>
                     <td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>
-                    <td style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
-                        <button onClick={() => setEditingId(r.id)} style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit</button>
+                    <td style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap' }}>
+                      {authUserEmail && r.employeeId === authUserEmail && !isEditing && (
+                        <button
+                          onClick={() => { setEditingId(r.id); setHistoryId(null); }}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                        >Edit</button>
                       )}
-                      {canDelete(r) && editingId !== r.id && (
-                        <button onClick={() => setDeletingRecord(r)} style={{ background: 'none', border: 'none', color: 'var(--color-critical)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Delete</button>
+                      {canDelete(r) && !isEditing && (
+                        <button
+                          onClick={() => setDeletingRecord(r)}
+                          style={{ background: 'none', border: 'none', color: 'var(--color-critical)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                        >Delete</button>
                       )}
+                      <button
+                        onClick={() => { setHistoryId(isHistory ? null : r.id); setEditingId(null); }}
+                        style={{ background: 'none', border: 'none', color: isHistory ? 'var(--color-accent)' : 'var(--color-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
+                      >History</button>
                     </td>
                   </tr>,
                 ];
-                if (editingId === r.id) {
+                if (isEditing) {
                   rows.push(
                     <tr key={`edit-${r.id}`}>
                       <td colSpan={8} style={{ padding: 0 }}>
@@ -2369,6 +2692,15 @@ exchangeRateDate: convertedRateDate,
                             activeTeamMembers={activeTeamMembers}
                           />
                         </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                if (isHistory) {
+                  rows.push(
+                    <tr key={`history-${r.id}`}>
+                      <td colSpan={8} style={{ padding: 0 }}>
+                        <ProcurementHistoryRow recordId={r.id} onClose={() => setHistoryId(null)} />
                       </td>
                     </tr>
                   );
