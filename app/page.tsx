@@ -27,6 +27,12 @@ function fmtHours(n: number): string {
   return String(r);
 }
 
+function fmtMoney(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `$${Math.round(n / 1_000)}K`;
+  return `$${Math.round(n)}`;
+}
+
 // Maps the new TimeFilter to the legacy Period for sub-pages that still use mock data.
 function timeFilterToPeriod(tf: TimeFilter): Period {
   return tf.periodType === 'week' ? 'weekly' : tf.periodType === 'month' ? 'monthly' : 'quarterly';
@@ -1122,11 +1128,7 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
 
   // Maps the three Procurement Activity KPI labels to ProcurementCategory values.
   // Any label in this map routes to ProcurementDrillDown (live data) instead of KPIDetailPanel (mock).
-  const PROC_DRILL_MAP: Partial<Record<string, ProcurementCategory>> = {
-    'PO Created':         'PO Created',
-    'Emergency Requests': 'Emergency Request',
-    'Supplier Payments':  'Supplier Payment',
-  };
+  const PROC_DRILL_MAP: Partial<Record<string, ProcurementCategory>> = {};
   const OPS_DRILL_MAP: Partial<Record<string, OperationsCategory>> = {
     'Systems Shipped':         'Systems Shipped',
     'Installations Completed': 'Installations Completed',
@@ -1187,26 +1189,28 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
     }
   }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Derive live Procurement Activity KPI values from procurement_records
-  const procPO    = procRecords.filter(r => r.category === 'PO Created');
-  const procPay   = procRecords.filter(r => r.category === 'Supplier Payment');
-  const procEmerg = procRecords.filter(r => r.category === 'Emergency Request');
-  const procPoTotal  = procPO.reduce((s, r)  => s + r.amountUsd, 0);
-  const procPayTotal = procPay.reduce((s, r) => s + r.amountUsd, 0);
+  // Derive live Procurement Activity KPI values — status-based financial totals
+  const procArrived    = procRecords.filter(r => r.status === 'PO Arrived');
+  const procIssued     = procRecords.filter(r => r.status === 'PO Issued');
+  const procTotalAmt   = procRecords.reduce((s, r) => s + r.amountUsd, 0);
+  const procArrivedAmt = procArrived.reduce((s, r) => s + r.amountUsd, 0);
+  const procIssuedAmt  = procIssued.reduce((s, r) => s + r.amountUsd, 0);
   const procKpiOverrides: Record<string, { value: string; note: string }> = {
-    'PO Created':         { value: String(procPO.length),    note: procPoTotal  > 0 ? `Total $${procPoTotal.toLocaleString()}`  : 'No POs this period'      },
-    'Emergency Requests': { value: String(procEmerg.length), note: 'Short-notice requests across departments'                                               },
-    'Supplier Payments':  { value: String(procPay.length),   note: procPayTotal > 0 ? `Total $${procPayTotal.toLocaleString()}` : 'No payments this period' },
+    'Total Procurement': { value: fmtMoney(procTotalAmt),   note: `${procRecords.length} records`       },
+    'Goods Received':    { value: fmtMoney(procArrivedAmt), note: `${procArrived.length} POs arrived`   },
+    'Goods Pending':     { value: fmtMoney(procIssuedAmt),  note: `${procIssued.length} POs issued`     },
   };
 
-  // Previous-period procurement deltas
-  const prevProcPO    = prevProcRecords.filter(r => r.category === 'PO Created');
-  const prevProcPay   = prevProcRecords.filter(r => r.category === 'Supplier Payment');
-  const prevProcEmerg = prevProcRecords.filter(r => r.category === 'Emergency Request');
+  // Previous-period procurement deltas (amount-based)
+  const prevProcArrived    = prevProcRecords.filter(r => r.status === 'PO Arrived');
+  const prevProcIssued     = prevProcRecords.filter(r => r.status === 'PO Issued');
+  const prevProcTotalAmt   = prevProcRecords.reduce((s, r) => s + r.amountUsd, 0);
+  const prevProcArrivedAmt = prevProcArrived.reduce((s, r) => s + r.amountUsd, 0);
+  const prevProcIssuedAmt  = prevProcIssued.reduce((s, r) => s + r.amountUsd, 0);
   const procDeltaMap: Record<string, ReturnType<typeof formatDelta>> = {
-    'PO Created':         formatDelta(procPO.length,    prevProcPO.length),
-    'Emergency Requests': formatDelta(procEmerg.length, prevProcEmerg.length),
-    'Supplier Payments':  formatDelta(procPay.length,   prevProcPay.length),
+    'Total Procurement': formatDelta(procTotalAmt,   prevProcTotalAmt),
+    'Goods Received':    formatDelta(procArrivedAmt, prevProcArrivedAmt),
+    'Goods Pending':     formatDelta(procIssuedAmt,  prevProcIssuedAmt),
   };
 
   // Derive live Operations KPI values — quantity sums (not record counts)
@@ -2238,12 +2242,12 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
     fetchProcurementFromDB(timeFilter).then(data => { setRecords(data); setLoading(false); });
   }, [timeFilter]);
 
-  // Derived KPIs
-  const poCat   = records.filter(r => r.category === 'PO Created');
-  const payCat  = records.filter(r => r.category === 'Supplier Payment');
-  const emergCat = records.filter(r => r.category === 'Emergency Request');
-  const poTotal  = poCat.reduce((s, r)  => s + r.amountUsd, 0);
-  const payTotal = payCat.reduce((s, r) => s + r.amountUsd, 0);
+  // Derived KPIs — status-based financial totals
+  const arrivedRecords = records.filter(r => r.status === 'PO Arrived');
+  const issuedRecords  = records.filter(r => r.status === 'PO Issued');
+  const totalAmt   = records.reduce((s, r) => s + r.amountUsd, 0);
+  const arrivedAmt = arrivedRecords.reduce((s, r) => s + r.amountUsd, 0);
+  const issuedAmt  = issuedRecords.reduce((s, r) => s + r.amountUsd, 0);
 
   const handleSave = async (record: ProcurementRecord) => {
     setSaveErr('');
@@ -2647,23 +2651,20 @@ const normalizedDate =
         <div className="card"><div className="panel-empty"><div className="panel-empty-icon">⏳</div><div>Loading procurement records…</div></div></div>
       ) : (
         <div className="grid three">
-          <div className="card kpi-clickable" role="button" tabIndex={0}
-            onClick={() => setSelected('PO Created')} onKeyDown={e => e.key === 'Enter' && setSelected('PO Created')}>
-            <div className="kpi-label">PO Created</div>
-            <div className="kpi-value">{poCat.length}</div>
-            <div className="small">{poTotal > 0 ? `Total $${poTotal.toLocaleString()}` : 'No payments this period'}</div>
+          <div className="card">
+            <div className="kpi-label">Total Procurement</div>
+            <div className="kpi-value">{fmtMoney(totalAmt)}</div>
+            <div className="small">{records.length} records</div>
           </div>
-          <div className="card kpi-clickable" role="button" tabIndex={0}
-            onClick={() => setSelected('Emergency Request')} onKeyDown={e => e.key === 'Enter' && setSelected('Emergency Request')}>
-            <div className="kpi-label">Emergency Requests</div>
-            <div className="kpi-value">{emergCat.length}</div>
-            <div className="small">Short-notice requests</div>
+          <div className="card">
+            <div className="kpi-label">Goods Received</div>
+            <div className="kpi-value" style={{ color: 'var(--color-completed)' }}>{fmtMoney(arrivedAmt)}</div>
+            <div className="small">{arrivedRecords.length} POs arrived</div>
           </div>
-          <div className="card kpi-clickable" role="button" tabIndex={0}
-            onClick={() => setSelected('Supplier Payment')} onKeyDown={e => e.key === 'Enter' && setSelected('Supplier Payment')}>
-            <div className="kpi-label">Supplier Payments</div>
-            <div className="kpi-value">{payCat.length}</div>
-            <div className="small">{payTotal > 0 ? `Total $${payTotal.toLocaleString()}` : 'No payments this period'}</div>
+          <div className="card">
+            <div className="kpi-label">Goods Pending</div>
+            <div className="kpi-value" style={{ color: 'var(--color-warning)' }}>{fmtMoney(issuedAmt)}</div>
+            <div className="small">{issuedRecords.length} POs issued</div>
           </div>
         </div>
       )}

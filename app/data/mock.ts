@@ -152,9 +152,9 @@ export const dashboardSections: DashboardSection[] = [
   {
     title: 'Procurement Activity',
     kpis: [
-      { label: 'PO Created',              value:  '74', note: 'Oracle source',                          kpiRecordKey: 'PO Created'               },
-      { label: 'Emergency Requests',      value:  '19', note: 'Short-notice requests across departments'                                          },
-      { label: 'Supplier Payments',       value: '$284K', note: 'Processed together with Finance',      kpiRecordKey: 'Procurement Activity'     },
+      { label: 'Total Procurement', value: '$0', note: 'All PO records combined'   },
+      { label: 'Goods Received',    value: '$0', note: 'Status: PO Arrived'        },
+      { label: 'Goods Pending',     value: '$0', note: 'Status: PO Issued'         },
     ],
   },
 ];
