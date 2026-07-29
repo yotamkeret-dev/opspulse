@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
 import { isAdmin } from '@/lib/approved-members';
@@ -14,7 +14,7 @@ import {
   ACTIVITY_CATEGORIES, DashboardKpi, KPIRecord, MONTH_NAMES, Period, PeriodType,
   OperationsCategory, OperationsRecord, OPERATIONS_CATEGORIES, OPERATIONS_STATUSES, mockOperationsRecords,
   OperationsStatus,
-  ProcurementCategory, ProcurementRecord, PROCUREMENT_CATEGORIES, PROCUREMENT_STATUSES,
+  ProcurementCategory, ProcurementRecord, ProcurementStatus, PROCUREMENT_CATEGORIES, PROCUREMENT_STATUSES,
   SupportLog, TeamMember, TimeFilter, UnifiedActivity, buildUnifiedActivities,
   currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod, getPreviousPeriod,
   getDateRangeForFilter, getTimeFilterLabel, kpiRecords, mockProcurementRecords, seedSupportLogs,
@@ -28,9 +28,46 @@ function fmtHours(n: number): string {
 }
 
 function fmtMoney(n: number): string {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000)     return `$${Math.round(n / 1_000)}K`;
+  if (n >= 1_000_000) return `$${parseFloat((n / 1_000_000).toFixed(1))}M`;
+  if (n >= 1_000)     return `$${parseFloat((n / 1_000).toFixed(1))}K`;
   return `$${Math.round(n)}`;
+}
+
+// ── Export helpers ────────────────────────────────────────────────────────────
+async function exportRecordsToCSV(records: ProcurementRecord[], filename: string) {
+  const headers = ['PO Number','Supplier','Amount USD','Original Amount','Currency','Status','Date','Category','Owner','Notes'];
+  const rows = records.map(r => [
+    r.poNumber, r.supplier, r.amountUsd,
+    r.originalAmount ?? r.amountUsd, r.originalCurrency ?? 'USD',
+    r.status, r.date, r.category, r.employeeName,
+    (r.notes ?? '').replace(/\n/g, ' ').replace(/"/g, '""'),
+  ]);
+  const csv = [headers, ...rows].map(row => row.map(c => `"${c ?? ''}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function exportRecordsToExcel(records: ProcurementRecord[], filename: string) {
+  const XLSX = await import('xlsx');
+  const data  = records.map(r => ({
+    'PO Number':       r.poNumber,
+    'Supplier':        r.supplier,
+    'Amount USD':      r.amountUsd,
+    'Original Amount': r.originalAmount ?? r.amountUsd,
+    'Currency':        r.originalCurrency ?? 'USD',
+    'Status':          r.status,
+    'Date':            r.date,
+    'Category':        r.category,
+    'Owner':           r.employeeName,
+    'Notes':           r.notes,
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Procurement');
+  XLSX.writeFile(wb, filename);
 }
 
 // Maps the new TimeFilter to the legacy Period for sub-pages that still use mock data.
@@ -669,11 +706,12 @@ function HistoricalTimeFilter({ value, onChange }: { value: TimeFilter; onChange
   );
 }
 
-function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSignOut, children }: {
+function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSignOut, onSearchOpen, children }: {
   page: string; setPage: (p: string) => void;
   timeFilter: TimeFilter; onTimeFilterChange: (tf: TimeFilter) => void;
   authEmail?: string;
   onSignOut?: () => void;
+  onSearchOpen?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -709,6 +747,15 @@ function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSig
             <div className="small">Orca Operations Intelligence Platform</div>
           </div>
           <div className="topbar-right">
+            {onSearchOpen && (
+              <button
+                className="search-topbar-btn"
+                onClick={onSearchOpen}
+                title="Global search (⌘K)"
+              >
+                🔍 Search
+              </button>
+            )}
             <HistoricalTimeFilter value={timeFilter} onChange={onTimeFilterChange} />
             <span className="badge">{getTimeFilterLabel(timeFilter)}</span>
             {DEMO_MODE && <span className="badge badge-demo">Demo</span>}
@@ -2189,30 +2236,358 @@ function ProcurementHistoryRow({ recordId, onClose }: { recordId: string; onClos
         <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>No changes recorded yet.</div>
       )}
       {!DEMO_MODE && !loading && entries.length > 0 && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead>
-            <tr style={{ color: 'var(--color-muted)' }}>
-              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>When</th>
-              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>By</th>
-              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>Field</th>
-              <th style={{ textAlign: 'left', padding: '4px 8px 8px 0', fontWeight: 600 }}>From</th>
-              <th style={{ textAlign: 'left', padding: '4px 0 8px 0',   fontWeight: 600 }}>To</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map(e => (
-              <tr key={e.id} style={{ borderTop: '1px solid rgba(255,255,255,.05)' }}>
-                <td style={{ padding: '5px 8px 5px 0', color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>{fmt(e.changedAt)}</td>
-                <td style={{ padding: '5px 8px 5px 0', color: 'var(--color-muted)' }}>{e.changedBy || '—'}</td>
-                <td style={{ padding: '5px 8px 5px 0', fontWeight: 600, color: '#e8eef7' }}>{e.fieldName}</td>
-                <td style={{ padding: '5px 8px 5px 0', color: 'var(--color-danger)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.oldValue ?? '—'}</td>
-                <td style={{ padding: '5px 0 5px 0',  color: 'var(--color-completed)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.newValue ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ paddingTop: 4 }}>
+          {entries.map((e, i) => (
+            <div key={e.id} style={{ display: 'flex', gap: 12, paddingBottom: i < entries.length - 1 ? 16 : 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--color-accent)', marginTop: 3 }} />
+                {i < entries.length - 1 && <div style={{ width: 1, flex: 1, background: 'rgba(255,255,255,.1)', marginTop: 5 }} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 2 }}>{fmt(e.changedAt)}{e.changedBy ? ` · ${e.changedBy}` : ''}</div>
+                <div style={{ fontSize: 12 }}>
+                  <b style={{ color: '#e8eef7' }}>{e.fieldName}</b>
+                  {e.oldValue != null && <span style={{ color: 'var(--color-danger)' }}> {e.oldValue}</span>}
+                  {e.oldValue != null && e.newValue != null && <span style={{ color: 'var(--color-muted)' }}> →</span>}
+                  {e.newValue != null && <span style={{ color: 'var(--color-completed)' }}> {e.newValue}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
+  );
+}
+
+// ─── ProcurementStatusDrillDown ──────────────────────────────────────────────
+function ProcurementStatusDrillDown({
+  label, status, records, onClose,
+}: {
+  label: string;
+  status: 'all' | ProcurementStatus;
+  records: ProcurementRecord[];
+  onClose: () => void;
+}) {
+  const filtered = status === 'all' ? records : records.filter(r => r.status === status);
+  const total    = filtered.reduce((s, r) => s + r.amountUsd, 0);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const csvName = `procurement-${label.toLowerCase().replace(/\s+/g, '-')}.csv`;
+
+  return (
+    <>
+      <div className="panel-overlay" onClick={onClose} />
+      <div className="detail-panel" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{label}</h3>
+            <div className="small" style={{ marginTop: 4 }}>
+              {filtered.length} record{filtered.length !== 1 ? 's' : ''} · {fmtMoney(total)}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              onClick={() => exportRecordsToCSV(filtered, csvName)}
+              style={{ background: 'rgba(91,141,238,.12)', border: '1px solid rgba(91,141,238,.3)', color: 'var(--color-accent)', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}
+            >↓ CSV</button>
+            <button
+              onClick={() => exportRecordsToExcel(filtered, csvName.replace('.csv', '.xlsx'))}
+              style={{ background: 'rgba(91,141,238,.12)', border: '1px solid rgba(91,141,238,.3)', color: 'var(--color-accent)', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}
+            >↓ Excel</button>
+            <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+          </div>
+        </div>
+        <div className="panel-body">
+          {filtered.length === 0 ? (
+            <div className="panel-empty"><div className="panel-empty-icon">📋</div><div>No records</div></div>
+          ) : (
+            <table className="record-table">
+              <thead>
+                <tr><th>PO #</th><th>Supplier</th><th>Amount</th><th>Owner</th><th>Date</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.id}>
+                    <td><span className="rec-id">{r.poNumber || '—'}</span></td>
+                    <td>
+                      <div className="rec-name">{r.supplier}</div>
+                      {r.notes && <div className="rec-notes">{r.notes.split('\n')[0].slice(0, 60)}</div>}
+                    </td>
+                    <td><MoneyCell record={r} /></td>
+                    <td>{r.employeeName}</td>
+                    <td><span className="small">{r.date}</span></td>
+                    <td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── ProcurementAlerts ────────────────────────────────────────────────────────
+function ProcurementAlerts({ records }: { records: ProcurementRecord[] }) {
+  const now   = Date.now();
+  const dayMs = 86_400_000;
+
+  const overdue   = records.filter(r => r.status === 'PO Issued' && (now - new Date(r.date).getTime()) > 90 * dayMs);
+  const stale     = records.filter(r => r.status === 'PO Issued' && (now - new Date(r.date).getTime()) > 30 * dayMs && (now - new Date(r.date).getTime()) <= 90 * dayMs);
+  const highValue = records.filter(r => r.status === 'PO Issued' && r.amountUsd >= 50_000);
+  const etaPassed = records.filter(r => {
+    if (r.status !== 'PO Issued') return false;
+    const m = r.notes?.match(/Expected Receipt Date:\s*(\d{4}-\d{2}-\d{2})/);
+    return m ? new Date(m[1]).getTime() < now : false;
+  });
+
+  type AlertLevel = 'danger' | 'warning' | 'info';
+  const alerts: Array<{ level: AlertLevel; title: string; detail: string; recs: ProcurementRecord[] }> = [];
+  if (overdue.length)   alerts.push({ level: 'danger',  title: `${overdue.length} overdue PO${overdue.length > 1 ? 's' : ''}`,        detail: 'Pending for more than 90 days — no delivery recorded',        recs: overdue   });
+  if (etaPassed.length) alerts.push({ level: 'danger',  title: `${etaPassed.length} PO${etaPassed.length > 1 ? 's' : ''} past ETA`,   detail: 'Expected receipt date has passed — follow up with supplier',  recs: etaPassed });
+  if (highValue.length) alerts.push({ level: 'warning', title: `${highValue.length} high-value pending`,                              detail: `PO${highValue.length > 1 ? 's' : ''} over $50K awaiting delivery`, recs: highValue });
+  if (stale.length)     alerts.push({ level: 'info',    title: `${stale.length} PO${stale.length > 1 ? 's' : ''} 30–90 days pending`, detail: 'Consider requesting a supplier status update',                recs: stale     });
+
+  if (alerts.length === 0) return null;
+
+  const LEVEL: Record<AlertLevel, { bg: string; border: string; dot: string }> = {
+    danger:  { bg: 'rgba(239,68,68,.10)',  border: 'rgba(239,68,68,.30)',  dot: 'var(--color-danger)'   },
+    warning: { bg: 'rgba(245,158,11,.10)', border: 'rgba(245,158,11,.30)', dot: 'var(--color-warning)'  },
+    info:    { bg: 'rgba(91,141,238,.08)', border: 'rgba(91,141,238,.20)', dot: 'var(--color-accent)'   },
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <h2 className="section-title" style={{ margin: 0 }}>Procurement Alerts</h2>
+        <span style={{ background: 'rgba(239,68,68,.15)', color: 'var(--color-danger)', borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 700 }}>{alerts.length}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {alerts.map((a, i) => {
+          const s = LEVEL[a.level];
+          return (
+            <div key={i} style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 8, padding: '10px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.dot, flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, fontSize: 13, color: s.dot }}>{a.title}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--color-muted)', marginBottom: a.recs.length ? 6 : 0 }}>{a.detail}</div>
+              {a.recs.length > 0 && (
+                <div style={{ fontSize: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {a.recs.slice(0, 4).map((r, ri) => (
+                    <span key={ri} style={{ background: 'rgba(255,255,255,.05)', borderRadius: 6, padding: '2px 8px', color: '#e8eef7' }}>
+                      {r.poNumber || r.supplier} <span style={{ color: 'var(--color-muted)' }}>({fmtMoney(r.amountUsd)})</span>
+                    </span>
+                  ))}
+                  {a.recs.length > 4 && <span style={{ color: 'var(--color-muted)', fontSize: 11 }}>+{a.recs.length - 4} more</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── SupplierDashboard ────────────────────────────────────────────────────────
+function SupplierDashboard({ records }: { records: ProcurementRecord[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const bySupplier = new Map<string, ProcurementRecord[]>();
+  for (const r of records) {
+    const key = r.supplier.trim() || 'Unknown';
+    if (!bySupplier.has(key)) bySupplier.set(key, []);
+    bySupplier.get(key)!.push(r);
+  }
+
+  const suppliers = Array.from(bySupplier.entries())
+    .map(([name, recs]) => ({
+      name,
+      recs,
+      totalSpend:  recs.reduce((s, r) => s + r.amountUsd, 0),
+      poCount:     recs.length,
+      arrived:     recs.filter(r => r.status === 'PO Arrived').length,
+      issued:      recs.filter(r => r.status === 'PO Issued').length,
+      deliveryPct: recs.length > 0 ? Math.round((recs.filter(r => r.status === 'PO Arrived').length / recs.length) * 100) : 0,
+    }))
+    .sort((a, b) => b.totalSpend - a.totalSpend);
+
+  if (suppliers.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <h2 className="section-title" style={{ margin: 0 }}>Supplier Dashboard</h2>
+        <button
+          onClick={() => exportRecordsToExcel(records, 'supplier-summary.xlsx')}
+          style={{ background: 'rgba(91,141,238,.12)', border: '1px solid rgba(91,141,238,.3)', color: 'var(--color-accent)', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}
+        >↓ Excel</button>
+      </div>
+      <table className="record-table">
+        <thead>
+          <tr><th>Supplier</th><th>Total Spend</th><th>POs</th><th>Received</th><th>Pending</th><th>Delivery Rate</th></tr>
+        </thead>
+        <tbody>
+          {suppliers.flatMap(s => [
+            <tr key={s.name} style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === s.name ? null : s.name)}>
+              <td><b>{s.name}</b> <span style={{ fontSize: 10, color: 'var(--color-muted)' }}>{expanded === s.name ? '▲' : '▼'}</span></td>
+              <td><b style={{ color: 'var(--color-accent)' }}>{fmtMoney(s.totalSpend)}</b></td>
+              <td>{s.poCount}</td>
+              <td style={{ color: 'var(--color-completed)' }}>{s.arrived}</td>
+              <td style={{ color: s.issued > 0 ? 'var(--color-warning)' : 'var(--color-muted)' }}>{s.issued}</td>
+              <td>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ flex: 1, height: 5, background: 'rgba(255,255,255,.08)', borderRadius: 3, overflow: 'hidden', minWidth: 50 }}>
+                    <div style={{ width: `${s.deliveryPct}%`, height: '100%', background: s.deliveryPct >= 80 ? 'var(--color-completed)' : s.deliveryPct >= 50 ? 'var(--color-warning)' : 'var(--color-danger)', borderRadius: 3 }} />
+                  </div>
+                  <span className="small">{s.deliveryPct}%</span>
+                </div>
+              </td>
+            </tr>,
+            expanded === s.name ? (
+              <tr key={`${s.name}-detail`}>
+                <td colSpan={6} style={{ padding: 0 }}>
+                  <div style={{ padding: '8px 16px 12px', background: 'rgba(0,0,0,.25)', borderTop: '1px solid rgba(255,255,255,.05)' }}>
+                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ color: 'var(--color-muted)' }}>
+                          {['PO #', 'Amount', 'Currency', 'Date', 'Status'].map(h => (
+                            <th key={h} style={{ textAlign: 'left', padding: '3px 8px 6px 0', fontWeight: 600 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {s.recs.map(r => (
+                          <tr key={r.id} style={{ borderTop: '1px solid rgba(255,255,255,.04)' }}>
+                            <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-accent)' }}>{r.poNumber || '—'}</td>
+                            <td style={{ padding: '4px 8px 4px 0' }}>{fmtMoney(r.amountUsd)}</td>
+                            <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-muted)' }}>{r.originalCurrency ?? 'USD'}</td>
+                            <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-muted)' }}>{r.date}</td>
+                            <td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            ) : null,
+          ])}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── GlobalSearch ──────────────────────────────────────────────────────────────
+function GlobalSearch({
+  open, onClose, procRecords, supportLogs, opsRecords,
+}: {
+  open: boolean;
+  onClose: () => void;
+  procRecords: ProcurementRecord[];
+  supportLogs: SupportLog[];
+  opsRecords: OperationsRecord[];
+}) {
+  const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) { setQuery(''); setTimeout(() => inputRef.current?.focus(), 40); }
+  }, [open]);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const q = query.trim().toLowerCase();
+  type Hit = { type: string; id: string; title: string; sub: string; badge: string };
+  const results: Hit[] = q.length < 2 ? [] : [
+    ...procRecords.filter(r =>
+      r.poNumber?.toLowerCase().includes(q) ||
+      r.supplier?.toLowerCase().includes(q) ||
+      r.notes?.toLowerCase().includes(q)
+    ).slice(0, 8).map(r => ({ type: 'PO', id: r.id, title: r.poNumber ? `${r.poNumber} — ${r.supplier}` : r.supplier, sub: `${fmtMoney(r.amountUsd)} · ${r.status} · ${r.date}`, badge: 'PO' })),
+    ...supportLogs.filter(l =>
+      l.title?.toLowerCase().includes(q) ||
+      l.notes?.toLowerCase().includes(q) ||
+      l.employeeName?.toLowerCase().includes(q)
+    ).slice(0, 5).map(l => ({ type: 'Activity', id: l.id, title: l.title, sub: `${l.employeeName} · ${l.date}`, badge: 'Activity' })),
+    ...opsRecords.filter(r =>
+      r.category?.toLowerCase().includes(q) ||
+      r.notes?.toLowerCase().includes(q) ||
+      r.employeeName?.toLowerCase().includes(q)
+    ).slice(0, 3).map(r => ({ type: 'Ops', id: r.id, title: r.category, sub: `Qty ${r.quantity} · ${r.employeeName} · ${r.date}`, badge: 'Ops' })),
+  ];
+
+  const BADGE_COLOR: Record<string, string> = {
+    PO:       'rgba(91,141,238,.25)',
+    Activity: 'rgba(34,197,94,.20)',
+    Ops:      'rgba(245,158,11,.20)',
+  };
+  const TEXT_COLOR: Record<string, string> = {
+    PO:       'var(--color-accent)',
+    Activity: 'var(--color-completed)',
+    Ops:      'var(--color-warning)',
+  };
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div className="panel-overlay" style={{ backdropFilter: 'blur(4px)', zIndex: 2000 }} onClick={onClose} />
+      <div style={{
+        position: 'fixed', top: '14%', left: '50%', transform: 'translateX(-50%)',
+        width: 'min(640px, 92vw)', background: 'var(--color-card)',
+        border: '1px solid rgba(255,255,255,.12)', borderRadius: 16,
+        zIndex: 2001, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,.65)',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid rgba(255,255,255,.07)', gap: 10 }}>
+          <span style={{ fontSize: 15, color: 'var(--color-muted)' }}>🔍</span>
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search POs, suppliers, activities…"
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 15, color: '#e8eef7', fontFamily: 'inherit' }}
+          />
+          <kbd style={{ fontSize: 11, color: 'var(--color-muted)', background: 'rgba(255,255,255,.06)', borderRadius: 5, padding: '2px 7px', fontFamily: 'inherit' }}>Esc</kbd>
+        </div>
+        <div style={{ maxHeight: 440, overflowY: 'auto' }}>
+          {q.length < 2 ? (
+            <div style={{ padding: '22px 18px', color: 'var(--color-muted)', fontSize: 13 }}>Type 2+ characters to search across POs, suppliers, activities and operations.</div>
+          ) : results.length === 0 ? (
+            <div style={{ padding: '22px 18px', color: 'var(--color-muted)', fontSize: 13 }}>No results for &quot;{query}&quot;</div>
+          ) : results.map((r, i) => (
+            <div
+              key={r.id + i}
+              style={{ padding: '11px 18px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,.04)', display: 'flex', alignItems: 'center', gap: 12 }}
+              onClick={onClose}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(91,141,238,.07)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <span style={{ fontSize: 10, fontWeight: 700, background: BADGE_COLOR[r.badge], color: TEXT_COLOR[r.badge], borderRadius: 5, padding: '2px 7px', minWidth: 52, textAlign: 'center', flexShrink: 0 }}>
+                {r.badge}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#e8eef7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>{r.sub}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -2228,12 +2603,13 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
 }) {
   const [records,      setRecords]      = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
   const [loading,      setLoading]      = useState(!DEMO_MODE);
-  const [selected,     setSelected]     = useState<ProcurementCategory | null>(null);
-  const [showForm,     setShowForm]     = useState(false);
-  const [showImport,   setShowImport]   = useState(false);
-  const [editingId,    setEditingId]    = useState<string | null>(null);
-  const [historyId,    setHistoryId]    = useState<string | null>(null);
-  const [saveErr,      setSaveErr]      = useState('');
+  const [selected,      setSelected]      = useState<ProcurementCategory | null>(null);
+  const [statusFilter,  setStatusFilter]  = useState<'all' | ProcurementStatus | null>(null);
+  const [showForm,      setShowForm]      = useState(false);
+  const [showImport,    setShowImport]    = useState(false);
+  const [editingId,     setEditingId]     = useState<string | null>(null);
+  const [historyId,     setHistoryId]     = useState<string | null>(null);
+  const [saveErr,       setSaveErr]       = useState('');
   const [deletingRecord, setDeletingRecord] = useState<ProcurementRecord | null>(null);
 
   useEffect(() => {
@@ -2595,6 +2971,14 @@ const normalizedDate =
   return (
     <>
       {selected && <ProcurementDrillDown category={selected} records={records} onClose={() => setSelected(null)} />}
+      {statusFilter !== null && (
+        <ProcurementStatusDrillDown
+          label={statusFilter === 'all' ? 'Total Procurement' : statusFilter === 'PO Arrived' ? 'Goods Received' : 'Goods Pending'}
+          status={statusFilter}
+          records={records}
+          onClose={() => setStatusFilter(null)}
+        />
+      )}
       {deletingRecord && (
         <DeleteConfirmModal
           title={`${deletingRecord.poNumber || 'PO'} — ${deletingRecord.supplier} — $${deletingRecord.amountUsd.toLocaleString()}`}
@@ -2618,16 +3002,18 @@ const normalizedDate =
             <div className="small">Purchase orders, payments and emergency requests · {getTimeFilterLabel(timeFilter)}</div>
           </div>
           {!showForm && (
-            <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+            <div style={{ display:'flex', gap:8, flexShrink:0, flexWrap:'wrap', justifyContent:'flex-end' }}>
+              <button
+                onClick={() => exportRecordsToExcel(records, 'procurement.xlsx')}
+                style={{ background:'rgba(91,141,238,.12)', border:'1px solid rgba(91,141,238,.3)', color:'var(--color-accent)', borderRadius:12, padding:'11px 18px', cursor:'pointer', fontSize:14, fontWeight:700, fontFamily:'inherit', whiteSpace:'nowrap' }}
+              >↓ Export</button>
               <button className="save-button" style={{ marginTop:0 }} onClick={() => setShowForm(true)}>
                 + Log Procurement
               </button>
               <button
                 onClick={() => setShowImport(true)}
                 style={{ background:'rgba(91,141,238,.12)', border:'1px solid rgba(91,141,238,.3)', color:'var(--color-accent)', borderRadius:12, padding:'11px 18px', cursor:'pointer', fontSize:14, fontWeight:700, fontFamily:'inherit', whiteSpace:'nowrap' }}
-              >
-                ↑ Import file
-              </button>
+              >↑ Import file</button>
             </div>
           )}
         </div>
@@ -2650,23 +3036,33 @@ const normalizedDate =
       {loading ? (
         <div className="card"><div className="panel-empty"><div className="panel-empty-icon">⏳</div><div>Loading procurement records…</div></div></div>
       ) : (
-        <div className="grid three">
-          <div className="card">
-            <div className="kpi-label">Total Procurement</div>
-            <div className="kpi-value">{fmtMoney(totalAmt)}</div>
-            <div className="small">{records.length} records</div>
+        <>
+          <div className="grid three">
+            <div className="card kpi-clickable" role="button" tabIndex={0}
+              onClick={() => setStatusFilter('all')}
+              onKeyDown={e => e.key === 'Enter' && setStatusFilter('all')}>
+              <div className="kpi-label">Total Procurement</div>
+              <div className="kpi-value">{fmtMoney(totalAmt)}</div>
+              <div className="small">{records.length} records</div>
+            </div>
+            <div className="card kpi-clickable" role="button" tabIndex={0}
+              onClick={() => setStatusFilter('PO Arrived')}
+              onKeyDown={e => e.key === 'Enter' && setStatusFilter('PO Arrived')}>
+              <div className="kpi-label">Goods Received</div>
+              <div className="kpi-value" style={{ color: 'var(--color-completed)' }}>{fmtMoney(arrivedAmt)}</div>
+              <div className="small">{arrivedRecords.length} POs arrived</div>
+            </div>
+            <div className="card kpi-clickable" role="button" tabIndex={0}
+              onClick={() => setStatusFilter('PO Issued')}
+              onKeyDown={e => e.key === 'Enter' && setStatusFilter('PO Issued')}>
+              <div className="kpi-label">Goods Pending</div>
+              <div className="kpi-value" style={{ color: 'var(--color-warning)' }}>{fmtMoney(issuedAmt)}</div>
+              <div className="small">{issuedRecords.length} POs issued</div>
+            </div>
           </div>
-          <div className="card">
-            <div className="kpi-label">Goods Received</div>
-            <div className="kpi-value" style={{ color: 'var(--color-completed)' }}>{fmtMoney(arrivedAmt)}</div>
-            <div className="small">{arrivedRecords.length} POs arrived</div>
-          </div>
-          <div className="card">
-            <div className="kpi-label">Goods Pending</div>
-            <div className="kpi-value" style={{ color: 'var(--color-warning)' }}>{fmtMoney(issuedAmt)}</div>
-            <div className="small">{issuedRecords.length} POs issued</div>
-          </div>
-        </div>
+          <ProcurementAlerts records={records} />
+          <SupplierDashboard records={records} />
+        </>
       )}
 
       {!loading && records.length > 0 && (
@@ -3707,6 +4103,7 @@ function AddWeeklyActivity({
 export default function App() {
   const [page, setPage]           = useState('Executive Dashboard');
   const [timeFilter, setTimeFilter] = useState<TimeFilter>(currentTimeFilter);
+  const [showSearch, setShowSearch] = useState(false);
 
   // ── Demo Mode state ──────────────────────────────────────────────────────
   const [userLogs, setUserLogs] = useState<SupportLog[]>([]);
@@ -3760,6 +4157,18 @@ export default function App() {
     fetchProcurementFromDB(timeFilter).then(setDbProcRecords).catch(() => {});
     fetchOperationsFromDB(timeFilter).then(setDbOpsRecords).catch(() => {});
   }, [timeFilter, authUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Global search keyboard shortcut (Cmd+K / Ctrl+K) ────────────────────
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowSearch(v => !v);
+      }
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, []);
 
   // ── Real-time: push inserts from other users into local state ────────────
   // Requires "Realtime" enabled on the support_logs table in Supabase dashboard.
@@ -3856,13 +4265,23 @@ export default function App() {
   if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} onUpdateLog={updateLog} />;
 
   return (
-    <Shell
-      page={page} setPage={setPage}
-      timeFilter={timeFilter} onTimeFilterChange={setTimeFilter}
-      authEmail={authUser?.email}
-      onSignOut={signOut}
-    >
-      {content}
-    </Shell>
+    <>
+      <Shell
+        page={page} setPage={setPage}
+        timeFilter={timeFilter} onTimeFilterChange={setTimeFilter}
+        authEmail={authUser?.email}
+        onSignOut={signOut}
+        onSearchOpen={() => setShowSearch(true)}
+      >
+        {content}
+      </Shell>
+      <GlobalSearch
+        open={showSearch}
+        onClose={() => setShowSearch(false)}
+        procRecords={DEMO_MODE ? mockProcurementRecords : dbProcRecords}
+        supportLogs={supportLogs}
+        opsRecords={DEMO_MODE ? mockOperationsRecords : dbOpsRecords}
+      />
+    </>
   );
 }
