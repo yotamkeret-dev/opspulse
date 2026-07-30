@@ -1104,12 +1104,15 @@ function TeamContributions({ timeFilter, supportLogs, activeTeamMembers }: { tim
 
 // ─── Delta helper ──────────────────────────────────────────────────────────
 
-function formatDelta(current: number, previous: number): {
+function formatDelta(current: number, previous: number, fmt?: (n: number) => string): {
   text: string; isPositive: boolean; isNeutral: boolean;
 } {
   if (current === previous) return { text: '—', isPositive: false, isNeutral: true };
   const diff = current - previous;
-  return { text: `${diff > 0 ? '+' : ''}${diff} vs prev`, isPositive: diff > 0, isNeutral: false };
+  const abs  = Math.abs(diff);
+  const sign = diff > 0 ? '+' : '−';
+  const str  = fmt ? fmt(abs) : String(parseFloat(abs.toFixed(1)));
+  return { text: `${sign}${str} vs prev`, isPositive: diff > 0, isNeutral: false };
 }
 
 // ─── Executive Summary Card ────────────────────────────────────────────────
@@ -1134,9 +1137,9 @@ function ExecSummaryCard({ currentLogs, previousLogs, currentProc, previousProc 
     emergency:  previousProc.filter(r => r.category === 'Emergency Request').length,
     payments:   previousProc.filter(r => r.category === 'Supplier Payment').length,
   };
-  const metrics: { label: string; cur: number; prev: number; fmt?: (n: number) => string }[] = [
+  const metrics: { label: string; cur: number; prev: number; fmt?: (n: number) => string; deltaFmt?: (n: number) => string }[] = [
     { label: 'Activities',    cur: c.activities, prev: p.activities },
-    { label: 'Support Hours', cur: c.hours,      prev: p.hours,     fmt: (n: number) => `${fmtHours(n)}h` },
+    { label: 'Support Hours', cur: c.hours,      prev: p.hours,     fmt: (n: number) => `${fmtHours(n)}h`, deltaFmt: (n: number) => `${fmtHours(n)}h` },
     { label: 'PO Created',    cur: c.po,         prev: p.po        },
     { label: 'Emergency',     cur: c.emergency,  prev: p.emergency  },
     { label: 'Payments',      cur: c.payments,   prev: p.payments   },
@@ -1146,7 +1149,7 @@ function ExecSummaryCard({ currentLogs, previousLogs, currentProc, previousProc 
       <div className="exec-summary-title">Period Summary</div>
       <div className="exec-summary-grid">
         {metrics.map(m => {
-          const d = formatDelta(m.cur, m.prev);
+          const d = formatDelta(m.cur, m.prev, m.deltaFmt);
           const cls = `exec-delta ${d.isNeutral ? 'exec-delta-neutral' : d.isPositive ? 'exec-delta-up' : 'exec-delta-down'}`;
           return (
             <div key={m.label} className="exec-summary-item">
@@ -1168,6 +1171,8 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
   const [selectedMember,       setSelectedMember]       = useState<string | null>(null);
   const [selectedProcCategory, setSelectedProcCategory] = useState<ProcurementCategory | null>(null);
   const [selectedOpsCategory,  setSelectedOpsCategory]  = useState<OperationsCategory | null>(null);
+  const [procStatusFilter,     setProcStatusFilter]     = useState<'PO Arrived' | 'PO Issued' | null>(null);
+  const [execViewingRecord,    setExecViewingRecord]    = useState<ProcurementRecord | null>(null);
   const [procRecords,     setProcRecords]     = useState<ProcurementRecord[]>([]);
   const [prevProcRecords, setPrevProcRecords] = useState<ProcurementRecord[]>([]);
   const [opsRecords,      setOpsRecords]      = useState<OperationsRecord[]>([]);
@@ -1176,6 +1181,10 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
   // Maps the three Procurement Activity KPI labels to ProcurementCategory values.
   // Any label in this map routes to ProcurementDrillDown (live data) instead of KPIDetailPanel (mock).
   const PROC_DRILL_MAP: Partial<Record<string, ProcurementCategory>> = {};
+  const PROC_STATUS_MAP: Record<string, 'PO Arrived' | 'PO Issued'> = {
+    'Goods Received': 'PO Arrived',
+    'Goods Pending':  'PO Issued',
+  };
   const OPS_DRILL_MAP: Partial<Record<string, OperationsCategory>> = {
     'Systems Shipped':         'Systems Shipped',
     'Installations Completed': 'Installations Completed',
@@ -1184,9 +1193,13 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
 
   const openKpi = (kpi: DashboardKpi) => {
     setSelectedMember(null);
-    const procCat = PROC_DRILL_MAP[kpi.label];
-    const opsCat  = OPS_DRILL_MAP[kpi.label];
-    if (procCat) {
+    const procStatus = PROC_STATUS_MAP[kpi.label];
+    const procCat    = PROC_DRILL_MAP[kpi.label];
+    const opsCat     = OPS_DRILL_MAP[kpi.label];
+    if (procStatus) {
+      setSelectedKpi(null); setSelectedProcCategory(null); setSelectedOpsCategory(null);
+      setProcStatusFilter(procStatus);
+    } else if (procCat) {
       setSelectedKpi(null); setSelectedOpsCategory(null);
       setSelectedProcCategory(procCat);
     } else if (opsCat) {
@@ -1255,9 +1268,9 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
   const prevProcArrivedAmt = prevProcArrived.reduce((s, r) => s + r.amountUsd, 0);
   const prevProcIssuedAmt  = prevProcIssued.reduce((s, r) => s + r.amountUsd, 0);
   const procDeltaMap: Record<string, ReturnType<typeof formatDelta>> = {
-    'Total Procurement': formatDelta(procTotalAmt,   prevProcTotalAmt),
-    'Goods Received':    formatDelta(procArrivedAmt, prevProcArrivedAmt),
-    'Goods Pending':     formatDelta(procIssuedAmt,  prevProcIssuedAmt),
+    'Total Procurement': formatDelta(procTotalAmt,   prevProcTotalAmt,   fmtMoney),
+    'Goods Received':    formatDelta(procArrivedAmt, prevProcArrivedAmt, fmtMoney),
+    'Goods Pending':     formatDelta(procIssuedAmt,  prevProcIssuedAmt,  fmtMoney),
   };
 
   // Derive live Operations KPI values — quantity sums (not record counts)
@@ -1286,6 +1299,16 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
       {selectedProcCategory && <ProcurementDrillDown category={selectedProcCategory} records={procRecords} onClose={() => setSelectedProcCategory(null)} />}
       {selectedOpsCategory  && <OperationsDrillDown category={selectedOpsCategory} records={opsRecords} onClose={() => setSelectedOpsCategory(null)} />}
       {selectedMember       && <TeamMemberPanel memberName={selectedMember} timeFilter={timeFilter} allActivities={allActivities} onClose={() => setSelectedMember(null)} />}
+      {procStatusFilter && (
+        <ProcurementStatusDrillDown
+          label={procStatusFilter === 'PO Arrived' ? 'Goods Received' : 'Goods Pending'}
+          status={procStatusFilter}
+          records={procRecords}
+          onClose={() => setProcStatusFilter(null)}
+          onSelectRecord={r => setExecViewingRecord(r)}
+        />
+      )}
+      {execViewingRecord && <ProcurementViewPanel record={execViewingRecord} onClose={() => setExecViewingRecord(null)} />}
 
       {/* ── Executive Summary ────────────────────────────────────────── */}
       <ExecSummaryCard
@@ -1304,7 +1327,7 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
           <div className="grid three">
             {section.kpis.map(kpi => {
               // Operations + Procurement cards are always clickable via their drill-down maps
-              const clickable = Boolean(kpi.kpiRecordKey) || Boolean(PROC_DRILL_MAP[kpi.label]) || Boolean(OPS_DRILL_MAP[kpi.label]);
+              const clickable = Boolean(kpi.kpiRecordKey) || Boolean(PROC_DRILL_MAP[kpi.label]) || Boolean(PROC_STATUS_MAP[kpi.label]) || Boolean(OPS_DRILL_MAP[kpi.label]);
               // Live overrides: Operations quantity sums take priority, then Procurement
               const override     = ({ ...opsKpiOverrides, ...procKpiOverrides })[kpi.label];
               const displayValue = override ? override.value : kpi.value;
@@ -2260,14 +2283,87 @@ function ProcurementHistoryRow({ recordId, onClose }: { recordId: string; onClos
   );
 }
 
+// ─── ProcurementViewPanel ────────────────────────────────────────────────────
+function ProcurementViewPanel({ record, onClose }: { record: ProcurementRecord; onClose: () => void }) {
+  const [attachments, setAttachments] = useState<RecordAttachment[]>([]);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (DEMO_MODE) return;
+    fetchAttachmentsForRecord('procurement', record.id).then(setAttachments);
+  }, [record.id]);
+
+  const eta = record.notes?.match(/Expected Receipt Date:\s*(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+  const isOverdue = eta && record.status !== 'PO Arrived' && new Date(eta).getTime() < Date.now();
+
+  const row = (label: string, val: React.ReactNode) => (
+    <div style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,.05)' }}>
+      <span style={{ width: 130, flexShrink: 0, fontSize: 12, color: 'var(--color-muted)', fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 13, color: '#e8eef7' }}>{val}</span>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="panel-overlay" style={{ zIndex: 3000 }} onClick={onClose} />
+      <div className="detail-panel" style={{ zIndex: 3001, width: 'min(540px,100vw)' }} onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <div>
+            <h3>{record.poNumber || 'PO Details'}</h3>
+            <div className="small" style={{ marginTop: 4 }}>{record.supplier}</div>
+          </div>
+          <button className="panel-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="panel-body">
+          {row('Status', <span className={`status-badge ${record.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{record.status}</span>)}
+          {row('Supplier', record.supplier)}
+          {row('Amount', <MoneyCell record={record} />)}
+          {row('Date', record.date)}
+          {row('Owner', record.employeeName || '—')}
+          {row('Category', record.category)}
+          {eta && row('ETA', <span style={{ color: isOverdue ? 'var(--color-danger)' : 'var(--color-completed)' }}>{eta}{isOverdue ? ' ⚠ overdue' : ''}</span>)}
+          {record.notes && (
+            <div style={{ padding: '10px 0' }}>
+              <div style={{ fontSize: 12, color: 'var(--color-muted)', fontWeight: 600, marginBottom: 6 }}>Notes</div>
+              <div style={{ fontSize: 13, color: '#e8eef7', whiteSpace: 'pre-wrap', lineHeight: 1.6, background: 'rgba(0,0,0,.2)', borderRadius: 8, padding: '10px 12px' }}>{record.notes}</div>
+            </div>
+          )}
+          {!DEMO_MODE && (
+            <div style={{ padding: '10px 0' }}>
+              <div style={{ fontSize: 12, color: 'var(--color-muted)', fontWeight: 600, marginBottom: 6 }}>Attachments</div>
+              {attachments.length === 0
+                ? <div className="form-note">No attachments</div>
+                : attachments.map(a => (
+                  <div key={a.id} style={{ marginBottom: 4 }}>
+                    <a href={getAttachmentPublicUrl(a.filePath)} target="_blank" rel="noreferrer"
+                      style={{ color: 'var(--color-accent)', fontSize: 12, textDecoration: 'underline' }}>
+                      📎 {a.fileName}{a.fileSize ? ` (${Math.round(a.fileSize / 1024)}KB)` : ''}
+                    </a>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── ProcurementStatusDrillDown ──────────────────────────────────────────────
 function ProcurementStatusDrillDown({
-  label, status, records, onClose,
+  label, status, records, onClose, onSelectRecord,
 }: {
   label: string;
   status: 'all' | ProcurementStatus;
   records: ProcurementRecord[];
   onClose: () => void;
+  onSelectRecord?: (r: ProcurementRecord) => void;
 }) {
   const filtered = status === 'all' ? records : records.filter(r => r.status === status);
   const total    = filtered.reduce((s, r) => s + r.amountUsd, 0);
@@ -2313,7 +2409,12 @@ function ProcurementStatusDrillDown({
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.id}>
+                  <tr key={r.id}
+                    style={{ cursor: onSelectRecord ? 'pointer' : undefined }}
+                    onClick={() => onSelectRecord?.(r)}
+                    onMouseEnter={e => { if (onSelectRecord) e.currentTarget.style.background = 'rgba(91,141,238,.06)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = ''; }}
+                  >
                     <td><span className="rec-id">{r.poNumber || '—'}</span></td>
                     <td>
                       <div className="rec-name">{r.supplier}</div>
@@ -2335,7 +2436,7 @@ function ProcurementStatusDrillDown({
 }
 
 // ─── ProcurementAlerts ────────────────────────────────────────────────────────
-function ProcurementAlerts({ records }: { records: ProcurementRecord[] }) {
+function ProcurementAlerts({ records, onSelectRecord }: { records: ProcurementRecord[]; onSelectRecord?: (r: ProcurementRecord) => void }) {
   const now   = Date.now();
   const dayMs = 86_400_000;
 
@@ -2382,7 +2483,19 @@ function ProcurementAlerts({ records }: { records: ProcurementRecord[] }) {
               {a.recs.length > 0 && (
                 <div style={{ fontSize: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                   {a.recs.slice(0, 4).map((r, ri) => (
-                    <span key={ri} style={{ background: 'rgba(255,255,255,.05)', borderRadius: 6, padding: '2px 8px', color: '#e8eef7' }}>
+                    <span
+                      key={ri}
+                      role={onSelectRecord ? 'button' : undefined}
+                      tabIndex={onSelectRecord ? 0 : undefined}
+                      onClick={() => onSelectRecord?.(r)}
+                      onKeyDown={e => e.key === 'Enter' && onSelectRecord?.(r)}
+                      style={{
+                        background: 'rgba(255,255,255,.05)', borderRadius: 6, padding: '2px 8px', color: '#e8eef7',
+                        cursor: onSelectRecord ? 'pointer' : undefined,
+                        textDecoration: onSelectRecord ? 'underline' : undefined,
+                        textDecorationColor: 'rgba(255,255,255,.2)',
+                      }}
+                    >
                       {r.poNumber || r.supplier} <span style={{ color: 'var(--color-muted)' }}>({fmtMoney(r.amountUsd)})</span>
                     </span>
                   ))}
@@ -2398,7 +2511,7 @@ function ProcurementAlerts({ records }: { records: ProcurementRecord[] }) {
 }
 
 // ─── SupplierDashboard ────────────────────────────────────────────────────────
-function SupplierDashboard({ records }: { records: ProcurementRecord[] }) {
+function SupplierDashboard({ records, onSelectRecord }: { records: ProcurementRecord[]; onSelectRecord?: (r: ProcurementRecord) => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const bySupplier = new Map<string, ProcurementRecord[]>();
@@ -2433,7 +2546,7 @@ function SupplierDashboard({ records }: { records: ProcurementRecord[] }) {
       </div>
       <table className="record-table">
         <thead>
-          <tr><th>Supplier</th><th>Total Spend</th><th>POs</th><th>Received</th><th>Pending</th><th>Delivery Rate</th></tr>
+          <tr><th>Supplier</th><th>Total Spend</th><th>POs</th><th>Received</th><th>Pending</th><th>Received Rate</th></tr>
         </thead>
         <tbody>
           {suppliers.flatMap(s => [
@@ -2459,21 +2572,30 @@ function SupplierDashboard({ records }: { records: ProcurementRecord[] }) {
                     <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                       <thead>
                         <tr style={{ color: 'var(--color-muted)' }}>
-                          {['PO #', 'Amount', 'Currency', 'Date', 'Status'].map(h => (
+                          {['PO #', 'Amount', 'Date', 'ETA', 'Status'].map(h => (
                             <th key={h} style={{ textAlign: 'left', padding: '3px 8px 6px 0', fontWeight: 600 }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {s.recs.map(r => (
-                          <tr key={r.id} style={{ borderTop: '1px solid rgba(255,255,255,.04)' }}>
-                            <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-accent)' }}>{r.poNumber || '—'}</td>
-                            <td style={{ padding: '4px 8px 4px 0' }}>{fmtMoney(r.amountUsd)}</td>
-                            <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-muted)' }}>{r.originalCurrency ?? 'USD'}</td>
-                            <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-muted)' }}>{r.date}</td>
-                            <td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>
-                          </tr>
-                        ))}
+                        {s.recs.map(r => {
+                          const eta = r.notes?.match(/Expected Receipt Date:\s*(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+                          const etaOverdue = eta && r.status !== 'PO Arrived' && new Date(eta).getTime() < Date.now();
+                          return (
+                            <tr key={r.id}
+                              style={{ borderTop: '1px solid rgba(255,255,255,.04)', cursor: onSelectRecord ? 'pointer' : undefined }}
+                              onClick={() => onSelectRecord?.(r)}
+                              onMouseEnter={e => { if (onSelectRecord) e.currentTarget.style.background = 'rgba(91,141,238,.08)'; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = ''; }}
+                            >
+                              <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-accent)' }}>{r.poNumber || '—'}</td>
+                              <td style={{ padding: '4px 8px 4px 0' }}>{fmtMoney(r.amountUsd)}</td>
+                              <td style={{ padding: '4px 8px 4px 0', color: 'var(--color-muted)' }}>{r.date}</td>
+                              <td style={{ padding: '4px 8px 4px 0', color: etaOverdue ? 'var(--color-danger)' : eta ? 'var(--color-completed)' : 'var(--color-muted)' }}>{eta ?? '—'}</td>
+                              <td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -2497,38 +2619,65 @@ function GlobalSearch({
   supportLogs: SupportLog[];
   opsRecords: OperationsRecord[];
 }) {
-  const [query, setQuery] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [query,       setQuery]       = useState('');
+  const [activeIdx,   setActiveIdx]   = useState(-1);
+  const [viewingPO,   setViewingPO]   = useState<ProcurementRecord | null>(null);
+  const [viewingLog,  setViewingLog]  = useState<SupportLog | null>(null);
+  const [viewingOps,  setViewingOps]  = useState<OperationsRecord | null>(null);
+  const inputRef  = useRef<HTMLInputElement>(null);
+  const listRef   = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) { setQuery(''); setTimeout(() => inputRef.current?.focus(), 40); }
+    if (open) { setQuery(''); setActiveIdx(-1); setViewingPO(null); setViewingLog(null); setViewingOps(null); setTimeout(() => inputRef.current?.focus(), 40); }
   }, [open]);
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', h);
-    return () => document.removeEventListener('keydown', h);
-  }, [onClose]);
-
   const q = query.trim().toLowerCase();
-  type Hit = { type: string; id: string; title: string; sub: string; badge: string };
+  type Hit = { type: 'PO' | 'Activity' | 'Ops'; id: string; title: string; sub: string; record?: ProcurementRecord; log?: SupportLog; opsRec?: OperationsRecord };
   const results: Hit[] = q.length < 2 ? [] : [
     ...procRecords.filter(r =>
       r.poNumber?.toLowerCase().includes(q) ||
       r.supplier?.toLowerCase().includes(q) ||
       r.notes?.toLowerCase().includes(q)
-    ).slice(0, 8).map(r => ({ type: 'PO', id: r.id, title: r.poNumber ? `${r.poNumber} — ${r.supplier}` : r.supplier, sub: `${fmtMoney(r.amountUsd)} · ${r.status} · ${r.date}`, badge: 'PO' })),
+    ).slice(0, 8).map(r => ({ type: 'PO' as const, id: r.id, title: r.poNumber ? `${r.poNumber} — ${r.supplier}` : r.supplier, sub: `${fmtMoney(r.amountUsd)} · ${r.status} · ${r.date}`, record: r })),
     ...supportLogs.filter(l =>
       l.title?.toLowerCase().includes(q) ||
       l.notes?.toLowerCase().includes(q) ||
       l.employeeName?.toLowerCase().includes(q)
-    ).slice(0, 5).map(l => ({ type: 'Activity', id: l.id, title: l.title, sub: `${l.employeeName} · ${l.date}`, badge: 'Activity' })),
+    ).slice(0, 5).map(l => ({ type: 'Activity' as const, id: l.id, title: l.title, sub: `${l.employeeName} · ${l.date}`, log: l })),
     ...opsRecords.filter(r =>
       r.category?.toLowerCase().includes(q) ||
       r.notes?.toLowerCase().includes(q) ||
       r.employeeName?.toLowerCase().includes(q)
-    ).slice(0, 3).map(r => ({ type: 'Ops', id: r.id, title: r.category, sub: `Qty ${r.quantity} · ${r.employeeName} · ${r.date}`, badge: 'Ops' })),
+    ).slice(0, 3).map(r => ({ type: 'Ops' as const, id: r.id, title: r.category, sub: `Qty ${r.quantity} · ${r.employeeName} · ${r.date}`, opsRec: r })),
   ];
+
+  const openHit = (hit: Hit) => {
+    if (hit.type === 'PO'       && hit.record) { setViewingLog(null); setViewingOps(null); setViewingPO(hit.record);  return; }
+    if (hit.type === 'Activity' && hit.log)    { setViewingPO(null);  setViewingOps(null); setViewingLog(hit.log);    return; }
+    if (hit.type === 'Ops'      && hit.opsRec) { setViewingPO(null);  setViewingLog(null); setViewingOps(hit.opsRec); return; }
+    onClose();
+  };
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!open) return;
+      if (e.key === 'Escape') { if (viewingPO || viewingLog || viewingOps) { setViewingPO(null); setViewingLog(null); setViewingOps(null); } else { onClose(); } return; }
+      if (results.length === 0) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, results.length - 1)); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); return; }
+      if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); openHit(results[activeIdx]); }
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, results, activeIdx, viewingPO]);
+
+  // Scroll active item into view
+  useEffect(() => {
+    if (activeIdx < 0 || !listRef.current) return;
+    const el = listRef.current.children[activeIdx] as HTMLElement | undefined;
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [activeIdx]);
 
   const BADGE_COLOR: Record<string, string> = {
     PO:       'rgba(91,141,238,.25)',
@@ -2557,13 +2706,13 @@ function GlobalSearch({
           <input
             ref={inputRef}
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => { setQuery(e.target.value); setActiveIdx(-1); }}
             placeholder="Search POs, suppliers, activities…"
             style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 15, color: '#e8eef7', fontFamily: 'inherit' }}
           />
           <kbd style={{ fontSize: 11, color: 'var(--color-muted)', background: 'rgba(255,255,255,.06)', borderRadius: 5, padding: '2px 7px', fontFamily: 'inherit' }}>Esc</kbd>
         </div>
-        <div style={{ maxHeight: 440, overflowY: 'auto' }}>
+        <div ref={listRef} style={{ maxHeight: 440, overflowY: 'auto' }}>
           {q.length < 2 ? (
             <div style={{ padding: '22px 18px', color: 'var(--color-muted)', fontSize: 13 }}>Type 2+ characters to search across POs, suppliers, activities and operations.</div>
           ) : results.length === 0 ? (
@@ -2571,22 +2720,86 @@ function GlobalSearch({
           ) : results.map((r, i) => (
             <div
               key={r.id + i}
-              style={{ padding: '11px 18px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,.04)', display: 'flex', alignItems: 'center', gap: 12 }}
-              onClick={onClose}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(91,141,238,.07)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              style={{
+                padding: '11px 18px', cursor: 'pointer',
+                borderBottom: '1px solid rgba(255,255,255,.04)',
+                display: 'flex', alignItems: 'center', gap: 12,
+                background: i === activeIdx ? 'rgba(91,141,238,.13)' : 'transparent',
+              }}
+              onClick={() => openHit(r)}
+              onMouseEnter={() => setActiveIdx(i)}
+              onMouseLeave={() => setActiveIdx(-1)}
             >
-              <span style={{ fontSize: 10, fontWeight: 700, background: BADGE_COLOR[r.badge], color: TEXT_COLOR[r.badge], borderRadius: 5, padding: '2px 7px', minWidth: 52, textAlign: 'center', flexShrink: 0 }}>
-                {r.badge}
+              <span style={{ fontSize: 10, fontWeight: 700, background: BADGE_COLOR[r.type], color: TEXT_COLOR[r.type], borderRadius: 5, padding: '2px 7px', minWidth: 52, textAlign: 'center', flexShrink: 0 }}>
+                {r.type}
               </span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: '#e8eef7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
                 <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>{r.sub}</div>
               </div>
+              {r.type === 'PO' && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--color-muted)', flexShrink: 0 }}>View →</span>}
             </div>
           ))}
         </div>
       </div>
+      {viewingPO  && <ProcurementViewPanel record={viewingPO} onClose={() => setViewingPO(null)} />}
+      {viewingLog && (
+        <>
+          <div className="panel-overlay" style={{ zIndex: 3000 }} onClick={() => setViewingLog(null)} />
+          <div className="detail-panel" style={{ zIndex: 3001, width: 'min(480px,100vw)' }} onClick={e => e.stopPropagation()}>
+            <div className="panel-header">
+              <div><h3>{viewingLog.title}</h3><div className="small" style={{ marginTop: 4 }}>{viewingLog.employeeName} · {viewingLog.date}</div></div>
+              <button className="panel-close" onClick={() => setViewingLog(null)}>✕</button>
+            </div>
+            <div className="panel-body">
+              {[
+                ['Category', viewingLog.category],
+                ['Department', viewingLog.department],
+                ['Hours', `${fmtHours(viewingLog.hours)}h`],
+              ].map(([l, v]) => v ? (
+                <div key={l} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,.05)' }}>
+                  <span style={{ width: 110, flexShrink: 0, fontSize: 12, color: 'var(--color-muted)', fontWeight: 600 }}>{l}</span>
+                  <span style={{ fontSize: 13, color: '#e8eef7' }}>{v}</span>
+                </div>
+              ) : null)}
+              {viewingLog.notes && (
+                <div style={{ padding: '10px 0' }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', fontWeight: 600, marginBottom: 6 }}>Notes</div>
+                  <div style={{ fontSize: 13, color: '#e8eef7', whiteSpace: 'pre-wrap', lineHeight: 1.6, background: 'rgba(0,0,0,.2)', borderRadius: 8, padding: '10px 12px' }}>{viewingLog.notes}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+      {viewingOps && (
+        <>
+          <div className="panel-overlay" style={{ zIndex: 3000 }} onClick={() => setViewingOps(null)} />
+          <div className="detail-panel" style={{ zIndex: 3001, width: 'min(480px,100vw)' }} onClick={e => e.stopPropagation()}>
+            <div className="panel-header">
+              <div><h3>{viewingOps.category}</h3><div className="small" style={{ marginTop: 4 }}>{viewingOps.employeeName} · {viewingOps.date}</div></div>
+              <button className="panel-close" onClick={() => setViewingOps(null)}>✕</button>
+            </div>
+            <div className="panel-body">
+              {[
+                ['Quantity', String(viewingOps.quantity)],
+                ['Status', viewingOps.status],
+              ].map(([l, v]) => v ? (
+                <div key={l} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,.05)' }}>
+                  <span style={{ width: 110, flexShrink: 0, fontSize: 12, color: 'var(--color-muted)', fontWeight: 600 }}>{l}</span>
+                  <span style={{ fontSize: 13, color: '#e8eef7' }}>{v}</span>
+                </div>
+              ) : null)}
+              {viewingOps.notes && (
+                <div style={{ padding: '10px 0' }}>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', fontWeight: 600, marginBottom: 6 }}>Notes</div>
+                  <div style={{ fontSize: 13, color: '#e8eef7', whiteSpace: 'pre-wrap', lineHeight: 1.6, background: 'rgba(0,0,0,.2)', borderRadius: 8, padding: '10px 12px' }}>{viewingOps.notes}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -2605,6 +2818,7 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
   const [loading,      setLoading]      = useState(!DEMO_MODE);
   const [selected,      setSelected]      = useState<ProcurementCategory | null>(null);
   const [statusFilter,  setStatusFilter]  = useState<'all' | ProcurementStatus | null>(null);
+  const [viewingRecord, setViewingRecord] = useState<ProcurementRecord | null>(null);
   const [showForm,      setShowForm]      = useState(false);
   const [showImport,    setShowImport]    = useState(false);
   const [editingId,     setEditingId]     = useState<string | null>(null);
@@ -2977,8 +3191,10 @@ const normalizedDate =
           status={statusFilter}
           records={records}
           onClose={() => setStatusFilter(null)}
+          onSelectRecord={r => { setViewingRecord(r); }}
         />
       )}
+      {viewingRecord && <ProcurementViewPanel record={viewingRecord} onClose={() => setViewingRecord(null)} />}
       {deletingRecord && (
         <DeleteConfirmModal
           title={`${deletingRecord.poNumber || 'PO'} — ${deletingRecord.supplier} — $${deletingRecord.amountUsd.toLocaleString()}`}
@@ -3060,8 +3276,8 @@ const normalizedDate =
               <div className="small">{issuedRecords.length} POs issued</div>
             </div>
           </div>
-          <ProcurementAlerts records={records} />
-          <SupplierDashboard records={records} />
+          <ProcurementAlerts records={records} onSelectRecord={setViewingRecord} />
+          <SupplierDashboard records={records} onSelectRecord={setViewingRecord} />
         </>
       )}
 
