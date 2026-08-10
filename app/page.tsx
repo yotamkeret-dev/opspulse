@@ -739,6 +739,19 @@ function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSig
             >{p}</button>
           ))}
         </div>
+        <a
+          href="https://ops-home-page.vercel.app/"
+          style={{
+            display:'flex',alignItems:'center',gap:8,
+            marginTop:'auto',padding:'10px 14px',
+            background:'linear-gradient(135deg,#1D2E6B,#2a4099)',
+            color:'#fff',borderRadius:10,fontSize:12,fontWeight:700,
+            textDecoration:'none',border:'1px solid rgba(255,255,255,.15)',
+            boxShadow:'0 2px 8px rgba(29,46,107,.35)',
+          }}
+        >
+          ← Ops Hub
+        </a>
       </aside>
       <main className="main">
         <div className="topbar">
@@ -759,20 +772,6 @@ function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSig
             <HistoricalTimeFilter value={timeFilter} onChange={onTimeFilterChange} />
             <span className="badge">{getTimeFilterLabel(timeFilter)}</span>
             {DEMO_MODE && <span className="badge badge-demo">Demo</span>}
-            <a
-              href="https://ops-home-page.vercel.app/"
-              style={{
-                display:'inline-flex',alignItems:'center',gap:6,
-                padding:'5px 14px 5px 10px',
-                background:'linear-gradient(135deg,#1D2E6B,#2a4099)',
-                color:'#fff',borderRadius:99,fontSize:12,fontWeight:700,
-                textDecoration:'none',border:'1.5px solid rgba(255,255,255,.15)',
-                boxShadow:'0 2px 8px rgba(29,46,107,.35)',whiteSpace:'nowrap',
-                transition:'all .18s',
-              }}
-            >
-              ← Ops Hub
-            </a>
             {!DEMO_MODE && authEmail && (
               <div className="auth-user">
                 <span className="small auth-email">{authEmail}</span>
