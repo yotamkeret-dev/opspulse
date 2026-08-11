@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { createClient } from '@/lib/supabase/client';
 import { isAdmin } from '@/lib/approved-members';
+import { CompanyProvider, useCompany } from '@/lib/company/context';
 import { convertToUsd, currencySymbol, SUPPORTED_CURRENCIES } from '@/lib/exchange-rate';
 import {
   parseFile, getHeaders, detectColumnMappings, columnMatchesToMap,
@@ -12,12 +13,12 @@ import {
 } from '@/lib/import-engine';
 import {
   ACTIVITY_CATEGORIES, DashboardKpi, KPIRecord, MONTH_NAMES, Period, PeriodType,
-  OperationsCategory, OperationsRecord, OPERATIONS_CATEGORIES, OPERATIONS_STATUSES, mockOperationsRecords,
+  OperationsCategory, OperationsRecord, OPERATIONS_CATEGORIES, OPERATIONS_STATUSES,
   OperationsStatus,
   ProcurementCategory, ProcurementRecord, ProcurementStatus, PROCUREMENT_CATEGORIES, PROCUREMENT_STATUSES,
   SupportLog, TeamMember, TimeFilter, UnifiedActivity, buildUnifiedActivities,
   currentTimeFilter, dashboardSections, filterLogsByTimeFilter, filterLogsByPeriod, getPreviousPeriod,
-  getDateRangeForFilter, getTimeFilterLabel, kpiRecords, mockProcurementRecords, seedSupportLogs,
+  getDateRangeForFilter, getTimeFilterLabel, kpiRecords,
   teamMembers,
 } from './data/mock';
 
@@ -75,27 +76,7 @@ function timeFilterToPeriod(tf: TimeFilter): Period {
   return tf.periodType === 'week' ? 'weekly' : tf.periodType === 'month' ? 'monthly' : 'quarterly';
 }
 
-// ─── Mode flag ─────────────────────────────────────────────────────────────
-// DEMO_MODE=true  → seed data + localStorage, no auth required (default when env var absent)
-// DEMO_MODE=false → Supabase DB + email authentication enforced by middleware
-const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE !== 'false';
-
-// ─── localStorage persistence (Demo Mode only) ─────────────────────────────
-const USER_LOGS_KEY = 'opspulse-user-logs';
-
-function loadUserLogs(): SupportLog[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(USER_LOGS_KEY);
-    return raw ? (JSON.parse(raw) as SupportLog[]) : [];
-  } catch { return []; }
-}
-
-function persistUserLogs(logs: SupportLog[]): void {
-  try { localStorage.setItem(USER_LOGS_KEY, JSON.stringify(logs)); } catch { /* silent */ }
-}
-
-// ─── Supabase helpers (Production Mode only) ───────────────────────────────
+// ─── Supabase helpers ───────────────────────────────────────────────────────
 // Maps DB snake_case rows to our SupportLog camelCase type.
 function rowToLog(row: Record<string, unknown>): SupportLog {
   return {
@@ -131,11 +112,12 @@ async function fetchTeamMembersFromDB(): Promise<TeamMember[]> {
   }));
 }
 
-async function fetchLogsFromDB(): Promise<SupportLog[]> {
+async function fetchLogsFromDB(companyId: string): Promise<SupportLog[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from('support_logs')
     .select('*')
+    .eq('company_id', companyId)
     .order('created_at', { ascending: false });
   if (error) {
     // Re-throw so the caller (bootstrap) knows the fetch failed.
@@ -150,8 +132,10 @@ async function fetchLogsFromDB(): Promise<SupportLog[]> {
 async function insertLogToDB(
   log: SupportLog,
   userId: string,
-  userEmail: string
+  userEmail: string,
+  companyId: string,
 ): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for support_logs');
   const supabase = createClient();
   // Chain .select('id') so we can verify the row was actually committed.
   // Supabase returns { data: null, error: null } when an RLS INSERT policy
@@ -172,6 +156,7 @@ async function insertLogToDB(
       week:           log.week,
       notes:          log.notes,
       created_by:     userId,
+      company_id:     companyId,
     })
     .select('id');
 
@@ -211,12 +196,13 @@ function rowToProcurementRecord(row: Record<string, unknown>): ProcurementRecord
   };
 }
 
-async function fetchProcurementFromDB(tf: TimeFilter): Promise<ProcurementRecord[]> {
+async function fetchProcurementFromDB(tf: TimeFilter, companyId: string): Promise<ProcurementRecord[]> {
   const supabase = createClient();
   const { start, end } = getDateRangeForFilter(tf);
   const { data, error } = await supabase
     .from('procurement_records')
     .select('*')
+    .eq('company_id', companyId)
     .gte('activity_date', start.toISOString().slice(0, 10))
     .lte('activity_date', end.toISOString().slice(0, 10))
     .order('activity_date', { ascending: false });
@@ -244,7 +230,8 @@ function normalizeProcurementStatus(status?: string): ProcurementRecord['status'
   // Everything else (pending, ordered, issued, open, in-progress…) → PO Issued
   return 'PO Issued';
 }
-async function insertProcurementToDB(record: ProcurementRecord, createdByEmail?: string): Promise<void> {
+async function insertProcurementToDB(record: ProcurementRecord, createdByEmail?: string, companyId?: string): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for procurement_records');
   const supabase = createClient();
   const { error } = await supabase.from('procurement_records').insert({
     id:                  record.id,
@@ -269,6 +256,7 @@ exchange_rate_date:
     ? record.exchangeRateDate
     : new Date().toISOString().slice(0, 10),    // Ownership
     created_by:          createdByEmail ?? null,
+    company_id:          companyId,
   });
   if (error) throw new Error(error.message);
 }
@@ -288,12 +276,13 @@ function rowToOperationsRecord(row: Record<string, unknown>): OperationsRecord {
   };
 }
 
-async function fetchOperationsFromDB(tf: TimeFilter): Promise<OperationsRecord[]> {
+async function fetchOperationsFromDB(tf: TimeFilter, companyId: string): Promise<OperationsRecord[]> {
   const supabase = createClient();
   const { start, end } = getDateRangeForFilter(tf);
   const { data, error } = await supabase
     .from('operations_records')
     .select('*')
+    .eq('company_id', companyId)
 .is('deleted_at', null)
 .gte('activity_date', start.toISOString().slice(0, 10))
     .lte('activity_date', end.toISOString().slice(0, 10))
@@ -302,7 +291,8 @@ async function fetchOperationsFromDB(tf: TimeFilter): Promise<OperationsRecord[]
   return (data ?? []).map(rowToOperationsRecord);
 }
 
-async function insertOperationsToDB(record: OperationsRecord): Promise<void> {
+async function insertOperationsToDB(record: OperationsRecord, companyId?: string): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for operations_records');
   const supabase = createClient();
   const { error } = await supabase.from('operations_records').insert({
     id:            record.id,
@@ -313,13 +303,15 @@ async function insertOperationsToDB(record: OperationsRecord): Promise<void> {
     quantity:      record.quantity,
     notes:         record.notes,
     status:        record.status,
+    company_id:    companyId,
   });
   if (error) throw new Error(error.message);
 }
 
 // ─── Update DB helpers (edit own records) ──────────────────────────────────
 
-async function updateSupportLogInDB(id: string, patch: Partial<SupportLog>): Promise<void> {
+async function updateSupportLogInDB(id: string, patch: Partial<SupportLog>, companyId: string): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for support_logs');
   const supabase = createClient();
   const update: Record<string, unknown> = {};
   if (patch.department !== undefined) update.department  = patch.department;
@@ -330,7 +322,7 @@ async function updateSupportLogInDB(id: string, patch: Partial<SupportLog>): Pro
   if (patch.week       !== undefined) update.week        = patch.week;
   if (patch.notes      !== undefined) update.notes       = patch.notes;
   if (patch.deletedAt  !== undefined) update.deleted_at  = patch.deletedAt;
-  const { error } = await supabase.from('support_logs').update(update).eq('id', id);
+  const { error } = await supabase.from('support_logs').update(update).eq('id', id).eq('company_id', companyId);
   if (error) throw new Error(error.message);
 }
 
@@ -401,12 +393,74 @@ async function fetchProcurementHistory(recordId: string): Promise<ProcurementHis
   }));
 }
 
+type OperationsHistoryEntry = {
+  id: string;
+  recordId: string;
+  changedAt: string;
+  changedBy: string;
+  fieldName: string;
+  oldValue: string | null;
+  newValue: string | null;
+};
+
+const OPS_TRACKED_FIELDS: { key: keyof OperationsRecord; label: string }[] = [
+  { key: 'category',     label: 'Category' },
+  { key: 'quantity',     label: 'Quantity' },
+  { key: 'employeeName', label: 'Employee' },
+  { key: 'date',         label: 'Date' },
+  { key: 'status',       label: 'Status' },
+  { key: 'notes',        label: 'Notes' },
+];
+
+async function insertOperationsHistoryRows(
+  recordId: string,
+  oldRecord: OperationsRecord,
+  patch: Partial<OperationsRecord>,
+  changedBy: string,
+): Promise<void> {
+  const supabase = createClient();
+  const rows: { record_id: string; changed_by: string; field_name: string; old_value: string | null; new_value: string | null }[] = [];
+  for (const { key, label } of OPS_TRACKED_FIELDS) {
+    const oldVal = oldRecord[key];
+    const newVal = patch[key];
+    if (newVal === undefined) continue;
+    const oldStr = oldVal != null ? String(oldVal) : null;
+    const newStr = newVal != null ? String(newVal) : null;
+    if (oldStr === newStr) continue;
+    rows.push({ record_id: recordId, changed_by: changedBy, field_name: label, old_value: oldStr, new_value: newStr });
+  }
+  if (rows.length === 0) return;
+  const { error } = await supabase.from('operations_history').insert(rows);
+  if (error) console.error('ops history insert:', error.message);
+}
+
+async function fetchOperationsHistory(recordId: string): Promise<OperationsHistoryEntry[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('operations_history')
+    .select('*')
+    .eq('record_id', recordId)
+    .order('changed_at', { ascending: false });
+  if (error) { console.error('fetchOpsHistory:', error.message); return []; }
+  return (data ?? []).map(row => ({
+    id:        String(row.id),
+    recordId:  String(row.record_id),
+    changedAt: String(row.changed_at),
+    changedBy: String(row.changed_by ?? ''),
+    fieldName: String(row.field_name),
+    oldValue:  row.old_value  != null ? String(row.old_value)  : null,
+    newValue:  row.new_value  != null ? String(row.new_value)  : null,
+  }));
+}
+
 async function updateProcurementInDB(
   id: string,
   patch: Partial<ProcurementRecord>,
   oldRecord?: ProcurementRecord,
   changedBy?: string,
+  companyId?: string,
 ): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for procurement_records');
   const supabase = createClient();
   const { error } = await supabase
     .from('procurement_records')
@@ -422,14 +476,16 @@ async function updateProcurementInDB(
           ? patch.date
           : new Date().toISOString().slice(0, 10),
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('company_id', companyId!);
   if (error) throw new Error(error.message);
   if (oldRecord && changedBy) {
     await insertProcurementHistoryRows(id, oldRecord, patch, changedBy);
   }
 }
 
-async function updateOperationsInDB(id: string, patch: Partial<OperationsRecord>): Promise<void> {
+async function updateOperationsInDB(id: string, patch: Partial<OperationsRecord>, companyId?: string): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for operations_records');
   const supabase = createClient();
   const { error } = await supabase
     .from('operations_records')
@@ -440,7 +496,8 @@ async function updateOperationsInDB(id: string, patch: Partial<OperationsRecord>
       notes:         patch.notes,
       activity_date: patch.date,
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('company_id', companyId!);
   if (error) throw new Error(error.message);
 }
 
@@ -462,8 +519,10 @@ async function softDeleteProcurementRecord(
   if (!data) throw new Error('Delete failed: no confirmation returned from server.');
 }
 async function softDeleteOperationsRecord(
-  id: string
+  id: string,
+  companyId?: string,
 ): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for operations_records');
   const supabase = createClient();
 
  const { error } = await supabase
@@ -471,7 +530,8 @@ async function softDeleteOperationsRecord(
   .update({
     deleted_at: new Date().toISOString()
   })
-  .eq('id', id);
+  .eq('id', id)
+  .eq('company_id', companyId);
 
   if (error) throw new Error(error.message);
 }
@@ -494,8 +554,10 @@ async function uploadAttachmentFile(
   file: File,
   recordType: 'support_log' | 'procurement' | 'operations',
   recordId: string,
-  uploadedBy?: string
+  uploadedBy?: string,
+  companyId?: string,
 ): Promise<RecordAttachment> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for record_attachments');
   const supabase = createClient();
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `${recordType}/${recordId}/${safeName}`;
@@ -505,20 +567,21 @@ async function uploadAttachmentFile(
   if (uploadErr) throw new Error(`Upload failed: ${uploadErr.message}`);
   const { data, error: dbErr } = await supabase
     .from('record_attachments')
-    .insert({ record_type: recordType, record_id: recordId, file_name: file.name, file_path: path, file_size: file.size, uploaded_by: uploadedBy ?? null })
+    .insert({ record_type: recordType, record_id: recordId, file_name: file.name, file_path: path, file_size: file.size, uploaded_by: uploadedBy ?? null, company_id: companyId })
     .select('id')
     .single();
   if (dbErr) throw new Error(`Attachment record failed: ${dbErr.message}`);
   return { id: String(data.id), recordType, recordId, fileName: file.name, filePath: path, fileSize: file.size, uploadedBy };
 }
 
-async function fetchAttachmentsForRecord(recordType: string, recordId: string): Promise<RecordAttachment[]> {
+async function fetchAttachmentsForRecord(recordType: string, recordId: string, companyId: string): Promise<RecordAttachment[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from('record_attachments')
     .select('*')
     .eq('record_type', recordType)
     .eq('record_id', recordId)
+    .eq('company_id', companyId)
     .order('created_at', { ascending: false });
   if (error) { console.error('fetchAttachments:', error.message); return []; }
   return (data ?? []).map((r: Record<string, unknown>) => ({
@@ -538,10 +601,11 @@ function getAttachmentPublicUrl(filePath: string): string {
   return supabase.storage.from('opspulse-attachments').getPublicUrl(filePath).data.publicUrl;
 }
 
-async function removeAttachment(id: string, filePath: string): Promise<void> {
+async function removeAttachment(id: string, filePath: string, companyId?: string): Promise<void> {
+  if (!companyId) throw new Error('Write blocked: companyId is required for record_attachments');
   const supabase = createClient();
   await supabase.storage.from('opspulse-attachments').remove([filePath]);
-  const { error } = await supabase.from('record_attachments').delete().eq('id', id);
+  const { error } = await supabase.from('record_attachments').delete().eq('id', id).eq('company_id', companyId);
   if (error) throw new Error(error.message);
 }
 
@@ -771,8 +835,7 @@ function Shell({ page, setPage, timeFilter, onTimeFilterChange, authEmail, onSig
             )}
             <HistoricalTimeFilter value={timeFilter} onChange={onTimeFilterChange} />
             <span className="badge">{getTimeFilterLabel(timeFilter)}</span>
-            {DEMO_MODE && <span className="badge badge-demo">Demo</span>}
-            {!DEMO_MODE && authEmail && (
+            {authEmail && (
               <div className="auth-user">
                 <span className="small auth-email">{authEmail}</span>
                 <button className="signout-btn" onClick={onSignOut}>Sign out</button>
@@ -1180,6 +1243,7 @@ function ExecSummaryCard({ currentLogs, previousLogs, currentProc, previousProc 
 // ─── Executive Dashboard ───────────────────────────────────────────────────
 
 function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }: { timeFilter: TimeFilter; supportLogs: SupportLog[]; activeTeamMembers: TeamMember[]; allActivities: UnifiedActivity[] }) {
+  const { companyId: execCompanyId } = useCompany();
   const [selectedKpi,          setSelectedKpi]          = useState<DashboardKpi | null>(null);
   const [selectedMember,       setSelectedMember]       = useState<string | null>(null);
   const [selectedProcCategory, setSelectedProcCategory] = useState<ProcurementCategory | null>(null);
@@ -1229,38 +1293,11 @@ function Executive({ timeFilter, supportLogs, activeTeamMembers, allActivities }
   useEffect(() => {
     const prev = getPreviousPeriod(timeFilter);
 
-    const filterMock = (tf: typeof timeFilter) => {
-      const { start, end } = getDateRangeForFilter(tf);
-      end.setHours(23, 59, 59, 999);
-      return mockProcurementRecords.filter(r => {
-        if (!r.date) return false;
-        const d = new Date(r.date + 'T00:00:00');
-        return d >= start && d <= end;
-      });
-    };
-
-    const filterMockOps = (tf: typeof timeFilter) => {
-      const { start, end } = getDateRangeForFilter(tf);
-      end.setHours(23, 59, 59, 999);
-      return mockOperationsRecords.filter(r => {
-        if (!r.date) return false;
-        const d = new Date(r.date + 'T00:00:00');
-        return d >= start && d <= end;
-      });
-    };
-
-    if (DEMO_MODE) {
-      setProcRecords(filterMock(timeFilter));
-      setPrevProcRecords(filterMock(prev));
-      setOpsRecords(filterMockOps(timeFilter));
-      setPrevOpsRecords(filterMockOps(prev));
-    } else {
-      fetchProcurementFromDB(timeFilter).then(setProcRecords);
-      fetchProcurementFromDB(prev).then(setPrevProcRecords);
-      fetchOperationsFromDB(timeFilter).then(setOpsRecords);
-      fetchOperationsFromDB(prev).then(setPrevOpsRecords);
-    }
-  }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchProcurementFromDB(timeFilter, execCompanyId ?? '').then(setProcRecords);
+    fetchProcurementFromDB(prev, execCompanyId ?? '').then(setPrevProcRecords);
+    fetchOperationsFromDB(timeFilter, execCompanyId ?? '').then(setOpsRecords);
+    fetchOperationsFromDB(prev, execCompanyId ?? '').then(setPrevOpsRecords);
+  }, [timeFilter, execCompanyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive live Procurement Activity KPI values — status-based financial totals
   const procArrived    = procRecords.filter(r => r.status === 'PO Arrived');
@@ -1528,13 +1565,15 @@ function AttachmentWidget({
   pendingFile: File | null;
   onPendingFileChange: (f: File | null) => void;
 }) {
+  const { companyId: attCompanyId } = useCompany();
+  const attCid = attCompanyId ?? '';
   const [attachments, setAttachments] = useState<RecordAttachment[]>([]);
   const [attLoading,  setAttLoading]  = useState(false);
 
   useEffect(() => {
-    if (!recordId || DEMO_MODE) return;
+    if (!recordId) return;
     setAttLoading(true);
-    fetchAttachmentsForRecord(recordType, recordId)
+    fetchAttachmentsForRecord(recordType, recordId, attCid)
       .then(setAttachments)
       .finally(() => setAttLoading(false));
   }, [recordId, recordType]);
@@ -1542,7 +1581,7 @@ function AttachmentWidget({
   const handleRemove = async (att: RecordAttachment) => {
     if (!confirm(`Delete "${att.fileName}"?`)) return;
     try {
-      await removeAttachment(att.id, att.filePath);
+      await removeAttachment(att.id, att.filePath, attCid);
       setAttachments(prev => prev.filter(a => a.id !== att.id));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to delete attachment.');
@@ -1552,10 +1591,7 @@ function AttachmentWidget({
   return (
     <div>
       <div className="kpi-label" style={{ marginBottom: 4 }}>Attachment</div>
-      {DEMO_MODE ? (
-        <div className="form-note">File attachments require production mode (Supabase)</div>
-      ) : (
-        <>
+      <>
           {attLoading && <div className="form-note">Loading attachments…</div>}
           {attachments.map(att => (
             <div key={att.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -1586,7 +1622,6 @@ function AttachmentWidget({
             </label>
           )}
         </>
-      )}
     </div>
   );
 }
@@ -1602,6 +1637,7 @@ function ProcurementEntryForm({
   activeTeamMembers: TeamMember[];
   initialRecord?: ProcurementRecord;
 }) {
+  const { companyId: pefCid } = useCompany();
   const [employeeId, setEmployeeId] = useState(initialRecord?.employeeId ?? '');
 
 const [category, setCategory] = useState<ProcurementCategory>(
@@ -1691,9 +1727,9 @@ exchangeRateDate =
 
     setConverting(false);
     const recordId = initialRecord?.id ?? `PR-${Date.now()}`;
-    if (pendingFile && !DEMO_MODE) {
+    if (pendingFile) {
       try {
-        await uploadAttachmentFile(pendingFile, 'procurement', recordId);
+        await uploadAttachmentFile(pendingFile, 'procurement', recordId, undefined, pefCid!);
       } catch (err) {
         console.error('Attachment upload failed:', err);
       }
@@ -1854,7 +1890,6 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
 
   // Load templates on mount
   useEffect(() => {
-    if (DEMO_MODE) return;
     const supabase = createClient();
     fetchTemplates(supabase).then(setTemplates).catch(() => {/* non-critical */});
   }, []);
@@ -1941,7 +1976,7 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
   }
 
   async function handleSaveTemplate() {
-    if (!saveTplName.trim() || DEMO_MODE) return;
+    if (!saveTplName.trim()) return;
     const supabase = createClient();
     const tpl = await saveTemplate(supabase, {
       name:         saveTplName.trim(),
@@ -2248,7 +2283,6 @@ function ProcurementHistoryRow({ recordId, onClose }: { recordId: string; onClos
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (DEMO_MODE) { setLoading(false); return; }
     fetchProcurementHistory(recordId)
       .then(rows => { setEntries(rows); setLoading(false); })
       .catch(() => setLoading(false));
@@ -2266,12 +2300,62 @@ function ProcurementHistoryRow({ recordId, onClose }: { recordId: string; onClos
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-accent)' }}>Change History</span>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--color-muted)', fontSize: 13, cursor: 'pointer', padding: 0 }}>✕ Close</button>
       </div>
-      {DEMO_MODE && <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>Change history requires production mode.</div>}
-      {!DEMO_MODE && loading && <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>Loading…</div>}
-      {!DEMO_MODE && !loading && entries.length === 0 && (
+      {loading && <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>Loading…</div>}
+      {!loading && entries.length === 0 && (
         <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>No changes recorded yet.</div>
       )}
-      {!DEMO_MODE && !loading && entries.length > 0 && (
+      {!loading && entries.length > 0 && (
+        <div style={{ paddingTop: 4 }}>
+          {entries.map((e, i) => (
+            <div key={e.id} style={{ display: 'flex', gap: 12, paddingBottom: i < entries.length - 1 ? 16 : 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                <div style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--color-accent)', marginTop: 3 }} />
+                {i < entries.length - 1 && <div style={{ width: 1, flex: 1, background: 'rgba(255,255,255,.1)', marginTop: 5 }} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--color-muted)', marginBottom: 2 }}>{fmt(e.changedAt)}{e.changedBy ? ` · ${e.changedBy}` : ''}</div>
+                <div style={{ fontSize: 12 }}>
+                  <b style={{ color: '#e8eef7' }}>{e.fieldName}</b>
+                  {e.oldValue != null && <span style={{ color: 'var(--color-danger)' }}> {e.oldValue}</span>}
+                  {e.oldValue != null && e.newValue != null && <span style={{ color: 'var(--color-muted)' }}> →</span>}
+                  {e.newValue != null && <span style={{ color: 'var(--color-completed)' }}> {e.newValue}</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OperationsHistoryRow({ recordId, onClose }: { recordId: string; onClose: () => void }) {
+  const [entries, setEntries] = useState<OperationsHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchOperationsHistory(recordId)
+      .then(rows => { setEntries(rows); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [recordId]);
+
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
+           ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  return (
+    <div style={{ padding: '14px 18px', background: 'rgba(91,141,238,.05)', borderTop: '1px solid rgba(255,255,255,.07)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-accent)' }}>Change History</span>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--color-muted)', fontSize: 13, cursor: 'pointer', padding: 0 }}>✕ Close</button>
+      </div>
+      {loading && <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>Loading…</div>}
+      {!loading && entries.length === 0 && (
+        <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>No changes recorded yet.</div>
+      )}
+      {!loading && entries.length > 0 && (
         <div style={{ paddingTop: 4 }}>
           {entries.map((e, i) => (
             <div key={e.id} style={{ display: 'flex', gap: 12, paddingBottom: i < entries.length - 1 ? 16 : 4 }}>
@@ -2298,6 +2382,7 @@ function ProcurementHistoryRow({ recordId, onClose }: { recordId: string; onClos
 
 // ─── ProcurementViewPanel ────────────────────────────────────────────────────
 function ProcurementViewPanel({ record, onClose }: { record: ProcurementRecord; onClose: () => void }) {
+  const { companyId: pvpCompanyId } = useCompany();
   const [attachments, setAttachments] = useState<RecordAttachment[]>([]);
 
   useEffect(() => {
@@ -2307,8 +2392,8 @@ function ProcurementViewPanel({ record, onClose }: { record: ProcurementRecord; 
   }, [onClose]);
 
   useEffect(() => {
-    if (DEMO_MODE) return;
-    fetchAttachmentsForRecord('procurement', record.id).then(setAttachments);
+    fetchAttachmentsForRecord('procurement', record.id, pvpCompanyId ?? '').then(setAttachments);
+
   }, [record.id]);
 
   const eta = record.notes?.match(/Expected Receipt Date:\s*(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
@@ -2346,8 +2431,7 @@ function ProcurementViewPanel({ record, onClose }: { record: ProcurementRecord; 
               <div style={{ fontSize: 13, color: '#e8eef7', whiteSpace: 'pre-wrap', lineHeight: 1.6, background: 'rgba(0,0,0,.2)', borderRadius: 8, padding: '10px 12px' }}>{record.notes}</div>
             </div>
           )}
-          {!DEMO_MODE && (
-            <div style={{ padding: '10px 0' }}>
+          <div style={{ padding: '10px 0' }}>
               <div style={{ fontSize: 12, color: 'var(--color-muted)', fontWeight: 600, marginBottom: 6 }}>Attachments</div>
               {attachments.length === 0
                 ? <div className="form-note">No attachments</div>
@@ -2361,7 +2445,6 @@ function ProcurementViewPanel({ record, onClose }: { record: ProcurementRecord; 
                 ))
               }
             </div>
-          )}
         </div>
       </div>
     </>
@@ -2819,31 +2902,34 @@ function GlobalSearch({
 
 // ─── Procurement Page ──────────────────────────────────────────────────────
 
-function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUserId, onRecordAdded, onRecordDeleted }: {
+function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUserId, onRecordAdded, onRecordDeleted, supportLogs, onUpdateLog }: {
   timeFilter: TimeFilter;
   activeTeamMembers: TeamMember[];
   authUserEmail?: string;
   authUserId?: string;
   onRecordAdded?: (record: ProcurementRecord) => void;
   onRecordDeleted?: (id: string) => void;
+  supportLogs?: SupportLog[];
+  onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
 }) {
-  const [records,      setRecords]      = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
-  const [loading,      setLoading]      = useState(!DEMO_MODE);
+  const { companyId: procCompanyId } = useCompany();
+  const [records,      setRecords]      = useState<ProcurementRecord[]>([]);
+  const [loading,      setLoading]      = useState(true);
   const [selected,      setSelected]      = useState<ProcurementCategory | null>(null);
   const [statusFilter,  setStatusFilter]  = useState<'all' | ProcurementStatus | null>(null);
   const [viewingRecord, setViewingRecord] = useState<ProcurementRecord | null>(null);
   const [showForm,      setShowForm]      = useState(false);
   const [showImport,    setShowImport]    = useState(false);
   const [editingId,     setEditingId]     = useState<string | null>(null);
+  const [editingLogId,  setEditingLogId]  = useState<string | null>(null);
   const [historyId,     setHistoryId]     = useState<string | null>(null);
   const [saveErr,       setSaveErr]       = useState('');
   const [deletingRecord, setDeletingRecord] = useState<ProcurementRecord | null>(null);
 
   useEffect(() => {
-    if (DEMO_MODE) return;
     setLoading(true);
-    fetchProcurementFromDB(timeFilter).then(data => { setRecords(data); setLoading(false); });
-  }, [timeFilter]);
+    fetchProcurementFromDB(timeFilter, procCompanyId ?? '').then(data => { setRecords(data); setLoading(false); });
+  }, [timeFilter, procCompanyId]);
 
   // Derived KPIs — status-based financial totals
   const arrivedRecords = records.filter(r => r.status === 'PO Arrived');
@@ -2851,12 +2937,13 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
   const totalAmt   = records.reduce((s, r) => s + r.amountUsd, 0);
   const arrivedAmt = arrivedRecords.reduce((s, r) => s + r.amountUsd, 0);
   const issuedAmt  = issuedRecords.reduce((s, r) => s + r.amountUsd, 0);
+  const procLogs   = filterLogsByTimeFilter(supportLogs ?? [], timeFilter).filter(l => l.category === 'Procurement' && !l.deletedAt);
 
   const handleSave = async (record: ProcurementRecord) => {
     setSaveErr('');
     try {
       const withOwner = { ...record, createdBy: authUserEmail };
-      if (!DEMO_MODE) await insertProcurementToDB(withOwner, authUserEmail);
+      await insertProcurementToDB(withOwner, authUserEmail, procCompanyId!);
       setRecords(prev => [withOwner, ...prev]);
       onRecordAdded?.(withOwner);
       setShowForm(false);
@@ -2867,7 +2954,7 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
 
   const handleDelete = async (record: ProcurementRecord, reason: string) => {
     try {
-      if (!DEMO_MODE) await softDeleteProcurementRecord(record.id, reason);
+      await softDeleteProcurementRecord(record.id, reason);
       setRecords(prev => prev.filter(r => r.id !== record.id));
       onRecordDeleted?.(record.id);
       setDeletingRecord(null);
@@ -2887,7 +2974,7 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
   const handleEdit = async (id: string, patch: Partial<ProcurementRecord>) => {
     try {
       const oldRecord = records.find(r => r.id === id);
-      if (!DEMO_MODE) await updateProcurementInDB(id, patch, oldRecord, authUserEmail ?? undefined);
+      await updateProcurementInDB(id, patch, oldRecord, authUserEmail ?? undefined, procCompanyId!);
       setRecords(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
       setEditingId(null);
     } catch (err) {
@@ -3035,8 +3122,7 @@ const normalizedDate =
         createdBy:        authUserEmail ?? undefined,
       };
 
-      if (!DEMO_MODE) {
-        const supabase = createClient();
+      const supabase = createClient();
         const activityDate = record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
           ? record.date
           : new Date().toISOString().slice(0, 10);
@@ -3086,7 +3172,8 @@ const normalizedDate =
                 : new Date().toISOString().slice(0, 10),
               raw_import:         rawImport,
             })
-            .eq('id', existingRecord.id);
+            .eq('id', existingRecord.id)
+            .eq('company_id', procCompanyId!);
 
           if (updErr) {
             console.error(`import upsert update [${record.poNumber}]:`, updErr.message);
@@ -3122,7 +3209,7 @@ const normalizedDate =
               week:         getWeekTag(activityDate),
               notes:        `Updated via import · Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
             };
-            await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
+            await insertLogToDB(logEntry, authUserId, authUserEmail ?? '', procCompanyId!).catch(e => console.error('import log:', e.message));
           }
         } else {
           // ── INSERT path: new record ────────────────────────────────────────────
@@ -3147,6 +3234,7 @@ const normalizedDate =
                 ? record.exchangeRateDate
                 : new Date().toISOString().slice(0, 10),
               created_by:        record.createdBy ?? null,
+              company_id:        procCompanyId!,
             })
             .select('id');
 
@@ -3175,24 +3263,18 @@ const normalizedDate =
               week:         getWeekTag(activityDate),
               notes:        `Supplier: ${record.supplier} · Total: $${(record.amountUsd || 0).toLocaleString()} · Status: ${record.status}`,
             };
-            await insertLogToDB(logEntry, authUserId, authUserEmail ?? '').catch(e => console.error('import log:', e.message));
+            await insertLogToDB(logEntry, authUserId, authUserEmail ?? '', procCompanyId!).catch(e => console.error('import log:', e.message));
           }
 
           setRecords(prev => [...prev, record]);
         }
-      } else {
-        // DEMO_MODE: just add to local state
-        setRecords(prev => [...prev, record]);
-      }
     }
 
     // Refresh records from DB so the table reflects any date-based filtering correctly.
     // Don't close the import panel here — let ProcurementImportPanel show its "done" step.
-    if (!DEMO_MODE) {
-      fetchProcurementFromDB(timeFilter)
-        .then(fresh => setRecords(fresh))
-        .catch(e => console.error('post-import refresh:', e.message));
-    }
+    fetchProcurementFromDB(timeFilter, procCompanyId ?? '')
+      .then(fresh => setRecords(fresh))
+      .catch(e => console.error('post-import refresh:', e.message));
   };
 
   return (
@@ -3315,7 +3397,7 @@ const normalizedDate =
                     <td>{r.date}</td>
                     <td><span className={`status-badge ${r.status === 'PO Arrived' ? 'status-complete' : 'status-open'}`}>{r.status}</span></td>
                     <td style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap' }}>
-                      {authUserEmail && r.employeeId === authUserEmail && !isEditing && (
+                      {canDelete(r) && !isEditing && (
                         <button
                           onClick={() => { setEditingId(r.id); setHistoryId(null); }}
                           style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}
@@ -3375,6 +3457,57 @@ const normalizedDate =
           </div>
         </div>
       )}
+
+      {!loading && procLogs.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2 className="section-title">Support Logs — Procurement</h2>
+          <table className="table">
+            <thead>
+              <tr><th>Title</th><th>Owner</th><th>Date</th><th>Hours</th><th>Notes</th><th></th></tr>
+            </thead>
+            <tbody>
+              {procLogs.flatMap(l => {
+                const isEditing = editingLogId === l.id;
+                const canAct = Boolean(authUserEmail) && (l.employeeId === authUserEmail || isAdmin(authUserEmail));
+                const rows: React.ReactElement[] = [
+                  <tr key={l.id}>
+                    <td><b>{l.title}</b></td>
+                    <td>{l.employeeName}</td>
+                    <td>{l.date}</td>
+                    <td>{fmtHours(l.hours)}h</td>
+                    <td>{l.notes && <div className="small">{l.notes}</div>}</td>
+                    <td style={{ display: 'flex', gap: 8, alignItems: 'center', whiteSpace: 'nowrap' }}>
+                      {canAct && !isEditing && (
+                        <button onClick={() => setEditingLogId(l.id)} style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit</button>
+                      )}
+                      {canAct && !isEditing && (
+                        <button onClick={() => { if (confirm('Delete this activity?')) onUpdateLog?.(l.id, { deletedAt: new Date().toISOString() } as Partial<SupportLog>); }} style={{ background: 'none', border: 'none', color: 'var(--color-critical)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Delete</button>
+                      )}
+                    </td>
+                  </tr>,
+                ];
+                if (isEditing) {
+                  rows.push(
+                    <tr key={`edit-log-${l.id}`}>
+                      <td colSpan={6} style={{ padding: 0 }}>
+                        <div style={{ padding: '0 10px 10px' }}>
+                          <SupportLogEditPanel
+                            key={`edit-log-panel-${l.id}`}
+                            log={l}
+                            onSave={patch => { onUpdateLog?.(l.id, patch); setEditingLogId(null); }}
+                            onCancel={() => setEditingLogId(null)}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                return rows;
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </>
   );
 }
@@ -3386,6 +3519,7 @@ function SupportLogEditPanel({ log, onSave, onCancel }: {
   onSave: (patch: Partial<SupportLog>) => void;
   onCancel: () => void;
 }) {
+  const { companyId: sleCid } = useCompany();
   const [departments, setDepartments] = useState<string[]>(parseDepts(log.department));
   const [category,    setCategory]    = useState(log.category);
   const [title,       setTitle]       = useState(log.title);
@@ -3399,9 +3533,9 @@ function SupportLogEditPanel({ log, onSave, onCancel }: {
       alert('Title and a positive number of hours are required.');
       return;
     }
-    if (pendingFile && !DEMO_MODE) {
+    if (pendingFile) {
       try {
-        await uploadAttachmentFile(pendingFile, 'support_log', log.id);
+        await uploadAttachmentFile(pendingFile, 'support_log', log.id, undefined, sleCid!);
       } catch (err) {
         console.error('Attachment upload failed:', err);
       }
@@ -3530,6 +3664,7 @@ function OperationsEntryForm({ onSave, onCancel, activeTeamMembers, initialRecor
   activeTeamMembers: TeamMember[];
   initialRecord?: OperationsRecord;
 }) {
+  const { companyId: oefCid } = useCompany();
   const [employeeId,  setEmployeeId]  = useState(initialRecord?.employeeId ?? '');
   const [category,    setCategory]    = useState<OperationsCategory>(initialRecord?.category ?? OPERATIONS_CATEGORIES[0]);
   const [quantity,    setQuantity]    = useState(initialRecord?.quantity?.toString() ?? '');
@@ -3545,9 +3680,9 @@ function OperationsEntryForm({ onSave, onCancel, activeTeamMembers, initialRecor
     const member = activeTeamMembers.find(m => m.id === employeeId);
     if (!member) return;
     const recordId = initialRecord?.id ?? `OPS-${Date.now()}`;
-    if (pendingFile && !DEMO_MODE) {
+    if (pendingFile) {
       try {
-        await uploadAttachmentFile(pendingFile, 'operations', recordId);
+        await uploadAttachmentFile(pendingFile, 'operations', recordId, undefined, oefCid!);
       } catch (err) {
         console.error('Attachment upload failed:', err);
       }
@@ -3626,34 +3761,26 @@ function OperationsPage({ timeFilter, activeTeamMembers, authUserEmail, onRecord
   authUserEmail?: string;
   onRecordAdded?: (record: OperationsRecord) => void;
 }) {
+  const { companyId: opsCompanyId } = useCompany();
   const [records,   setRecords]   = useState<OperationsRecord[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [selected,  setSelected]  = useState<OperationsCategory | null>(null);
   const [showForm,  setShowForm]  = useState(false);
   const [saveErr,   setSaveErr]   = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [historyId, setHistoryId] = useState<string | null>(null);
 const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(null);
   useEffect(() => {
-    const { start, end } = getDateRangeForFilter(timeFilter);
-    end.setHours(23, 59, 59, 999);
-    if (DEMO_MODE) {
-      setRecords(mockOperationsRecords.filter(r => {
-        const d = new Date(r.date + 'T00:00:00');
-        return d >= start && d <= end;
-      }));
-      setLoading(false);
-    } else {
-      setLoading(true);
-      fetchOperationsFromDB(timeFilter).then(data => { setRecords(data); setLoading(false); });
-    }
-  }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLoading(true);
+    fetchOperationsFromDB(timeFilter, opsCompanyId ?? '').then(data => { setRecords(data); setLoading(false); });
+  }, [timeFilter, opsCompanyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const qty = (cat: OperationsCategory) => records.filter(r => r.category === cat).reduce((s, r) => s + r.quantity, 0);
 
   const handleSave = async (record: OperationsRecord) => {
     setSaveErr('');
     try {
-      if (!DEMO_MODE) await insertOperationsToDB(record);
+      await insertOperationsToDB(record, opsCompanyId!);
       setRecords(prev => [record, ...prev]);
       onRecordAdded?.(record);
       setShowForm(false);
@@ -3662,7 +3789,9 @@ const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(nu
 
   const handleEdit = async (id: string, patch: Partial<OperationsRecord>) => {
     try {
-      if (!DEMO_MODE) await updateOperationsInDB(id, patch);
+      const oldRecord = records.find(r => r.id === id);
+      if (oldRecord) await insertOperationsHistoryRows(id, oldRecord, patch, authUserEmail ?? '').catch(console.error);
+      await updateOperationsInDB(id, patch, opsCompanyId!);
       setRecords(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
       setEditingId(null);
     } catch (err) {
@@ -3672,7 +3801,7 @@ const [deletingRecord, setDeletingRecord] = useState<OperationsRecord | null>(nu
 const handleDelete = async (id: string) => {
   if (!confirm('Delete this operations record?')) return;
   try {
-   if (!DEMO_MODE) await softDeleteOperationsRecord(id);
+   await softDeleteOperationsRecord(id, opsCompanyId!);
     setRecords(prev => prev.filter(r => r.id !== id));
   } catch (err) {
     alert(err instanceof Error ? err.message : 'Failed to delete record.');
@@ -3733,7 +3862,9 @@ const handleDelete = async (id: string) => {
             <thead><tr><th>Category</th><th>Qty</th><th>Employee</th><th>Date</th><th>Status</th><th>Notes</th><th></th></tr></thead>
             <tbody>
               {records.flatMap(r => {
-                const rows = [
+                const isEditing = editingId === r.id;
+                const isHistory = historyId === r.id;
+                const rows: React.ReactElement[] = [
                   <tr key={r.id}>
                     <td><span className="pill" style={{ fontSize: 11 }}>{r.category}</span></td>
                     <td style={{ fontWeight: 700, color: 'var(--color-completed)' }}>{r.quantity}</td>
@@ -3742,16 +3873,17 @@ const handleDelete = async (id: string) => {
                     <td><span className={`status-badge ${r.status === 'Completed' ? 'status-completed' : 'status-in-progress'}`}>{r.status}</span></td>
                     <td><span className="small">{r.notes || '—'}</span></td>
                     <td style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
-                        <button onClick={() => setEditingId(r.id)} style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit</button>
+                      {authUserEmail && (r.employeeId === authUserEmail || isAdmin(authUserEmail)) && !isEditing && (
+                        <button onClick={() => { setEditingId(r.id); setHistoryId(null); }} style={{ background: 'none', border: 'none', color: 'var(--color-accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit</button>
                       )}
-                      {authUserEmail && r.employeeId === authUserEmail && editingId !== r.id && (
+                      {authUserEmail && (r.employeeId === authUserEmail || isAdmin(authUserEmail)) && !isEditing && (
                         <button onClick={() => handleDelete(r.id)} style={{ background: 'none', border: 'none', color: 'var(--color-danger)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Delete</button>
                       )}
+                      <button onClick={() => { setHistoryId(isHistory ? null : r.id); setEditingId(null); }} style={{ background: 'none', border: 'none', color: isHistory ? 'var(--color-accent)' : 'var(--color-muted)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>History</button>
                     </td>
                   </tr>,
                 ];
-                if (editingId === r.id) {
+                if (isEditing) {
                   rows.push(
                     <tr key={`edit-${r.id}`}>
                       <td colSpan={7} style={{ padding: 0 }}>
@@ -3763,6 +3895,15 @@ const handleDelete = async (id: string) => {
                             activeTeamMembers={activeTeamMembers}
                           />
                         </div>
+                      </td>
+                    </tr>
+                  );
+                }
+                if (isHistory) {
+                  rows.push(
+                    <tr key={`history-${r.id}`}>
+                      <td colSpan={7} style={{ padding: 0 }}>
+                        <OperationsHistoryRow recordId={r.id} onClose={() => setHistoryId(null)} />
                       </td>
                     </tr>
                   );
@@ -3864,22 +4005,15 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
   supportLogs: SupportLog[];
   activeTeamMembers: TeamMember[];
 }) {
-  const [procRecords,     setProcRecords]     = useState<ProcurementRecord[]>(DEMO_MODE ? mockProcurementRecords : []);
+  const { companyId: hlCompanyId } = useCompany();
+  const [procRecords,     setProcRecords]     = useState<ProcurementRecord[]>([]);
   const [prevProcRecords, setPrevProcRecords] = useState<ProcurementRecord[]>([]);
 
   useEffect(() => {
     const prev = getPreviousPeriod(timeFilter);
-    const filterMock = (tf: typeof timeFilter) => {
-      const { start, end } = getDateRangeForFilter(tf);
-      end.setHours(23, 59, 59, 999);
-      return mockProcurementRecords.filter(r => {
-        const d = new Date(r.date + 'T00:00:00');
-        return d >= start && d <= end;
-      });
-    };
-    if (DEMO_MODE) { setProcRecords(filterMock(timeFilter)); setPrevProcRecords(filterMock(prev)); }
-    else { fetchProcurementFromDB(timeFilter).then(setProcRecords); fetchProcurementFromDB(prev).then(setPrevProcRecords); }
-  }, [timeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchProcurementFromDB(timeFilter, hlCompanyId ?? '').then(setProcRecords);
+    fetchProcurementFromDB(prev, hlCompanyId ?? '').then(setPrevProcRecords);
+  }, [timeFilter, hlCompanyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered     = filterLogsByTimeFilter(supportLogs, timeFilter);
   const prevFiltered = filterLogsByTimeFilter(supportLogs, getPreviousPeriod(timeFilter));
@@ -4030,20 +4164,26 @@ function Highlights({ timeFilter, supportLogs, activeTeamMembers }: {
 
 // ─── Activity Feed (derived from SupportLog) ───────────────────────────────
 
-function ActivityFeed({ timeFilter, allActivities, supportLogs, authUserEmail, onUpdateLog }: {
+function ActivityFeed({ timeFilter, allActivities, supportLogs, procRecords, opsRecords, activeTeamMembers, authUserEmail, onUpdateLog, onUpdateProcurement, onUpdateOperations, onDeleteProcurement, onDeleteOperations }: {
   timeFilter:    TimeFilter;
   allActivities: UnifiedActivity[];
-  supportLogs:   SupportLog[];   // kept for edit functionality (SupportLogEditPanel needs full SupportLog)
+  supportLogs:   SupportLog[];
+  procRecords:   ProcurementRecord[];
+  opsRecords:    OperationsRecord[];
+  activeTeamMembers: TeamMember[];
   authUserEmail?: string;
   onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
+  onUpdateProcurement?: (id: string, patch: Partial<ProcurementRecord>) => void;
+  onUpdateOperations?: (id: string, patch: Partial<OperationsRecord>) => void;
+  onDeleteProcurement?: (id: string) => void;
+  onDeleteOperations?: (id: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
-const handleDelete = (id: string) => {
+const handleDelete = (a: UnifiedActivity) => {
   if (!confirm('Delete this activity?')) return;
-
-  if (onUpdateLog) {
-    onUpdateLog(id, { deletedAt: new Date().toISOString() } as Partial<SupportLog>);
-  }
+  if (a.type === 'procurement') { onDeleteProcurement?.(a.id); return; }
+  if (a.type === 'operations')  { onDeleteOperations?.(a.id);  return; }
+  onUpdateLog?.(a.id, { deletedAt: new Date().toISOString() } as Partial<SupportLog>);
 };
   const { start, end } = getDateRangeForFilter(timeFilter);
   end.setHours(23, 59, 59, 999);
@@ -4074,12 +4214,14 @@ const handleDelete = (id: string) => {
       ) : (
         <div className="timeline">
           {items.map(a => {
-            const l = a.type === 'support' ? supportLogs.find(s => s.id === a.id) : null;
+            const l  = a.type === 'support'     ? supportLogs.find(s => s.id === a.id) : null;
+            const pr = a.type === 'procurement' ? procRecords.find(r => r.id === a.id) : null;
+            const or = a.type === 'operations'  ? opsRecords.find(r => r.id === a.id)  : null;
             return (
             <div key={a.id} className="event">
               <div><span className="pill">{a.date}</span></div>
               <div style={{ flex: 1 }}>
-                {l && editingId === a.id ? (
+                {editingId === a.id && l ? (
                   <SupportLogEditPanel
                     log={l}
                     onSave={patch => {
@@ -4088,11 +4230,25 @@ const handleDelete = (id: string) => {
                     }}
                     onCancel={() => setEditingId(null)}
                   />
+                ) : editingId === a.id && pr ? (
+                  <ProcurementEntryForm
+                    key={`edit-proc-${pr.id}`}
+                    initialRecord={pr}
+                    activeTeamMembers={activeTeamMembers}
+                    onSave={rec => { onUpdateProcurement?.(pr.id, rec); setEditingId(null); }}
+                    onCancel={() => setEditingId(null)}
+                  />
+                ) : editingId === a.id && or ? (
+                  <OperationsEntryForm
+                    key={`edit-ops-${or.id}`}
+                    initialRecord={or}
+                    activeTeamMembers={activeTeamMembers}
+                    onSave={rec => { onUpdateOperations?.(or.id, rec); setEditingId(null); }}
+                    onCancel={() => setEditingId(null)}
+                  />
                 ) : (
                   <>
-                    <span className="pill" style={{ fontSize:10, color: typeColor[a.type] }}>{typeLabel[a.type]}</span>
-                    {' '}
-                    <span className="pill">{a.category}</span>
+                    <span className="pill" style={{ fontSize:10, color: typeColor[a.type] }}>{a.category} → {typeLabel[a.type]}</span>
                     <h3 style={{ margin: '6px 0 4px', fontSize: 15 }}>{a.title}</h3>
                     {a.amountUsd != null && a.amountUsd > 0 && (
                       <MoneyCell record={{ amountUsd: a.amountUsd, originalAmount: a.originalAmount, originalCurrency: a.originalCurrency }} />
@@ -4102,7 +4258,7 @@ const handleDelete = (id: string) => {
                     <div className="event-meta">
                       <span className="owner-tag">↳ {a.employeeName}</span>
                       {a.hours != null && <span className="status-badge status-completed">{fmtHours(a.hours)}h</span>}
-                      {authUserEmail && a.employeeId === authUserEmail && (
+                      {authUserEmail && (a.employeeId === authUserEmail || isAdmin(authUserEmail)) && (
                         <span>
                           <button
                             onClick={() => setEditingId(a.id)}
@@ -4111,7 +4267,7 @@ const handleDelete = (id: string) => {
                             Edit
                           </button>
                           <button
-                            onClick={() => handleDelete(a.id)}
+                            onClick={() => handleDelete(a)}
                             style={{ background: 'none', border: 'none', color: 'var(--color-danger)', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0, marginLeft: 8 }}
                           >
                             Delete
@@ -4140,6 +4296,7 @@ function AddWeeklyActivity({
   activeTeamMembers: TeamMember[];
   onUpdateLog?: (id: string, patch: Partial<SupportLog>) => void;
 }) {
+  const { companyId: awaCid } = useCompany();
   const [employeeId,  setEmployeeId]  = useState('');
   const [departments, setDepartments] = useState<string[]>([]);
   const [category,    setCategory]    = useState<string>(ACTIVITY_CATEGORIES[0]);
@@ -4179,9 +4336,9 @@ function AddWeeklyActivity({
       notes,
     };
     addLog(log);
-    if (pendingFile && !DEMO_MODE) {
+    if (pendingFile) {
       try {
-        await uploadAttachmentFile(pendingFile, 'support_log', logId);
+        await uploadAttachmentFile(pendingFile, 'support_log', logId, undefined, awaCid!);
       } catch (err) {
         console.error('Attachment upload failed:', err);
       }
@@ -4329,13 +4486,11 @@ function AddWeeklyActivity({
 
 // ─── App ───────────────────────────────────────────────────────────────────
 
-export default function App() {
+function AppContent() {
+  const company = useCompany();
   const [page, setPage]           = useState('Executive Dashboard');
   const [timeFilter, setTimeFilter] = useState<TimeFilter>(currentTimeFilter);
   const [showSearch, setShowSearch] = useState(false);
-
-  // ── Demo Mode state ──────────────────────────────────────────────────────
-  const [userLogs, setUserLogs] = useState<SupportLog[]>([]);
 
   // ── Production Mode state ────────────────────────────────────────────────
   const [dbLogs,         setDbLogs]         = useState<SupportLog[]>([]);
@@ -4343,49 +4498,42 @@ export default function App() {
   const [dbProcRecords,  setDbProcRecords]   = useState<ProcurementRecord[]>([]);
   const [dbOpsRecords,   setDbOpsRecords]    = useState<OperationsRecord[]>([]);
   const [authUser,       setAuthUser]        = useState<{ id: string; email: string } | null>(null);
-  const [dbLoading,      setDbLoading]       = useState(!DEMO_MODE);
+  const [dbLoading,      setDbLoading]       = useState(true);
 
   // ── Bootstrap ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (DEMO_MODE) {
-      const saved = loadUserLogs();
-      if (saved.length > 0) setUserLogs(saved);
-    } else {
-      // Verify session (middleware already redirects if no session)
-      const supabase = createClient();
-      supabase.auth.getUser().then(async ({ data: { user } }) => {
-        if (user) {
-          setAuthUser({ id: user.id, email: user.email ?? '' });
-          try {
-            // Fetch all data sources in parallel for the unified activity stream
-            const tf = currentTimeFilter();
-            const [logs, members, proc, ops] = await Promise.all([
-              fetchLogsFromDB(),
-              fetchTeamMembersFromDB(),
-              fetchProcurementFromDB(tf).catch(() => [] as ProcurementRecord[]),
-              fetchOperationsFromDB(tf).catch(() => [] as OperationsRecord[]),
-            ]);
-            setDbLogs(logs);
-            if (members.length > 0) setDbTeamMembers(members);
-            setDbProcRecords(proc);
-            setDbOpsRecords(ops);
-          } catch (fetchErr) {
-            console.error('Bootstrap fetch failed:', fetchErr);
-          }
+    if (!company.companyId) return;
+    const cid = company.companyId;
+    const supabase = createClient();
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (user) {
+        setAuthUser({ id: user.id, email: user.email ?? '' });
+        try {
+          const tf = currentTimeFilter();
+          const [logs, members, proc, ops] = await Promise.all([
+            fetchLogsFromDB(cid),
+            fetchTeamMembersFromDB(),
+            fetchProcurementFromDB(tf, cid).catch(() => [] as ProcurementRecord[]),
+            fetchOperationsFromDB(tf, cid).catch(() => [] as OperationsRecord[]),
+          ]);
+          setDbLogs(logs);
+          if (members.length > 0) setDbTeamMembers(members);
+          setDbProcRecords(proc);
+          setDbOpsRecords(ops);
+        } catch (fetchErr) {
+          console.error('Bootstrap fetch failed:', fetchErr);
         }
-        setDbLoading(false);
-      });
-    }
-  }, []);
+      }
+      setDbLoading(false);
+    });
+  }, [company.companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Re-fetch proc/ops for the unified stream when timeFilter changes ─────
-  // The bootstrap fetches once with the initial filter; this keeps the unified
-  // activity stream (and Team Last Updates) current when the user changes periods.
   useEffect(() => {
-    if (DEMO_MODE || !authUser) return;
-    fetchProcurementFromDB(timeFilter).then(setDbProcRecords).catch(() => {});
-    fetchOperationsFromDB(timeFilter).then(setDbOpsRecords).catch(() => {});
-  }, [timeFilter, authUser]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!authUser || !company.companyId) return;
+    fetchProcurementFromDB(timeFilter, company.companyId).then(setDbProcRecords).catch(() => {});
+    fetchOperationsFromDB(timeFilter, company.companyId).then(setDbOpsRecords).catch(() => {});
+  }, [timeFilter, authUser, company.companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Global search keyboard shortcut (Cmd+K / Ctrl+K) ────────────────────
   useEffect(() => {
@@ -4400,9 +4548,7 @@ export default function App() {
   }, []);
 
   // ── Real-time: push inserts from other users into local state ────────────
-  // Requires "Realtime" enabled on the support_logs table in Supabase dashboard.
   useEffect(() => {
-    if (DEMO_MODE) return;
     const supabase = createClient();
     const channel = supabase
       .channel('opspulse:logs')
@@ -4418,50 +4564,30 @@ export default function App() {
     return () => { supabase.removeChannel(channel); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Derived log array ─────────────────────────────────────────────────────
-  // Demo  → localStorage submissions + seed data
-  // Prod  → only real DB records (seed data hidden)
-  const supportLogs: SupportLog[] = DEMO_MODE
-    ? [...userLogs, ...seedSupportLogs]
-    : dbLogs;
+  const supportLogs: SupportLog[] = dbLogs;
 
-  // ── Active team members ───────────────────────────────────────────────────
-  const activeTeamMembers: TeamMember[] = DEMO_MODE
-    ? teamMembers
-    : (dbTeamMembers.length > 0 ? dbTeamMembers : teamMembers);
+  const activeTeamMembers: TeamMember[] = dbTeamMembers.length > 0 ? dbTeamMembers : teamMembers;
 
-  // ── Unified activity stream ───────────────────────────────────────────────
-  // Merges support_logs + procurement_records + operations_records.
-  // Used by Activity Feed, Team Last Updates, and Team Contributions.
-  const procForStream: ProcurementRecord[]  = DEMO_MODE ? mockProcurementRecords : dbProcRecords;
-  const opsForStream:  OperationsRecord[]   = DEMO_MODE ? mockOperationsRecords  : dbOpsRecords;
+  const procForStream: ProcurementRecord[]  = dbProcRecords;
+  const opsForStream:  OperationsRecord[]   = dbOpsRecords;
   const allActivities = buildUnifiedActivities(supportLogs, procForStream, opsForStream);
 
   // ── Add log ───────────────────────────────────────────────────────────────
   const addLog = async (log: SupportLog) => {
-    if (DEMO_MODE) {
-      setUserLogs(prev => {
-        const updated = [log, ...prev];
-        persistUserLogs(updated);
-        return updated;
-      });
-    } else {
-      try {
-        await insertLogToDB(log, authUser!.id, authUser!.email);
-        setDbLogs(prev => [log, ...prev]);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        alert(`Failed to save activity: ${msg}`);
-      }
+    try {
+      await insertLogToDB(log, authUser!.id, authUser!.email, company.companyId!);
+      setDbLogs(prev => [log, ...prev]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      alert(`Failed to save activity: ${msg}`);
     }
   };
 
   // ── Update support log (edit own record) ─────────────────────────────────
   const updateLog = async (id: string, patch: Partial<SupportLog>) => {
     try {
-      if (!DEMO_MODE) await updateSupportLogInDB(id, patch);
+      await updateSupportLogInDB(id, patch, company.companyId!);
       setDbLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
-      setUserLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to update activity.');
     }
@@ -4474,8 +4600,8 @@ export default function App() {
     window.location.href = '/login';
   };
 
-  // ── Loading screen (production only, first paint) ─────────────────────────
-  if (dbLoading) {
+  // ── Loading screen ────────────────────────────────────────────────────────
+  if (dbLoading || company.loading) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#07111f', color: '#8fa3bb', fontFamily: 'Inter, sans-serif', fontSize: 14 }}>
         Loading OpsPulse…
@@ -4483,14 +4609,24 @@ export default function App() {
     );
   }
 
+  // ── No company assigned guard ─────────────────────────────────────────────
+  if (!company.companyId) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#07111f', color: '#8fa3bb', fontFamily: 'Inter, sans-serif', fontSize: 14, flexDirection: 'column', gap: 8 }}>
+        <div style={{ fontSize: 16, color: '#e8eef7', fontWeight: 600 }}>No company assigned</div>
+        <div>Please contact your administrator.</div>
+      </div>
+    );
+  }
+
   let content = <Executive timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} allActivities={allActivities} />;
   if (page === 'Team Contributions')           content = <TeamContributions timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
   
-  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} authUserId={authUser?.id} onRecordAdded={r => setDbProcRecords(prev => [r, ...prev.filter(x => x.id !== r.id)])} onRecordDeleted={id => setDbProcRecords(prev => prev.filter(r => r.id !== id))} />;
+  if (page === 'Procurement')                  content = <ProcurementPage timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} authUserId={authUser?.id} onRecordAdded={r => setDbProcRecords(prev => [r, ...prev.filter(x => x.id !== r.id)])} onRecordDeleted={id => setDbProcRecords(prev => prev.filter(r => r.id !== id))} supportLogs={supportLogs} onUpdateLog={updateLog} />;
   if (page === 'Operations')                   content = <OperationsPage  timeFilter={timeFilter} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} onRecordAdded={r => setDbOpsRecords(prev => [r, ...prev.filter(x => x.id !== r.id)])} />;
   if (page === 'Cross Functional Support')     content = <Support timeFilter={timeFilter} supportLogs={supportLogs} />;
   if (page === 'Weekly Highlights')            content = <Highlights timeFilter={timeFilter} supportLogs={supportLogs} activeTeamMembers={activeTeamMembers} />;
-  if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} allActivities={allActivities} supportLogs={supportLogs} authUserEmail={authUser?.email} onUpdateLog={updateLog} />;
+  if (page === 'Activity Feed')                content = <ActivityFeed timeFilter={timeFilter} allActivities={allActivities} supportLogs={supportLogs} procRecords={dbProcRecords} opsRecords={dbOpsRecords} activeTeamMembers={activeTeamMembers} authUserEmail={authUser?.email} onUpdateLog={updateLog} onUpdateProcurement={async (id, patch) => { try { const old = dbProcRecords.find(r => r.id === id); await updateProcurementInDB(id, patch, old, authUser?.email ?? undefined, company.companyId!); setDbProcRecords(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r)); } catch (err) { alert(err instanceof Error ? err.message : 'Failed to update'); } }} onUpdateOperations={async (id, patch) => { try { await updateOperationsInDB(id, patch, company.companyId!); setDbOpsRecords(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r)); } catch (err) { alert(err instanceof Error ? err.message : 'Failed to update'); } }} onDeleteProcurement={id => softDeleteProcurementRecord(id, '').then(() => setDbProcRecords(prev => prev.filter(r => r.id !== id))).catch(console.error)} onDeleteOperations={id => softDeleteOperationsRecord(id, company.companyId!).then(() => setDbOpsRecords(prev => prev.filter(r => r.id !== id))).catch(console.error)} />;
   if (page === 'Add Weekly Activity')          content = <AddWeeklyActivity addLog={addLog} activeTeamMembers={activeTeamMembers} onUpdateLog={updateLog} />;
 
   return (
@@ -4507,10 +4643,18 @@ export default function App() {
       <GlobalSearch
         open={showSearch}
         onClose={() => setShowSearch(false)}
-        procRecords={DEMO_MODE ? mockProcurementRecords : dbProcRecords}
+        procRecords={dbProcRecords}
         supportLogs={supportLogs}
-        opsRecords={DEMO_MODE ? mockOperationsRecords : dbOpsRecords}
+        opsRecords={dbOpsRecords}
       />
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <CompanyProvider>
+      <AppContent />
+    </CompanyProvider>
   );
 }

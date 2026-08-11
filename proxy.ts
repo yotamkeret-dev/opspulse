@@ -4,11 +4,6 @@ import { isApproved } from '@/lib/approved-members';
 
 // Next.js 16 renamed "middleware" to "proxy" — same API, different export name.
 export async function proxy(request: NextRequest) {
-  // In Demo Mode authentication is bypassed — the app works fully without Supabase.
-  if (process.env.NEXT_PUBLIC_DEMO_MODE !== 'false') {
-    return NextResponse.next();
-  }
-
   // Public paths that do not need auth
   const { pathname } = request.nextUrl;
   const isPublic =

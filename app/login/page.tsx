@@ -42,6 +42,22 @@ export default function LoginPage() {
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     if (p.get('error') === 'auth_failed') setError('The sign-in link was invalid or has expired. Please try again.');
+
+    const ssoCode = p.get('sso_code');
+    if (ssoCode) {
+      window.history.replaceState({}, '', window.location.pathname);
+      fetch('/api/sso/exchange', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sso_code: ssoCode }),
+      })
+        .then(res => (res.ok ? res.json() : null))
+        .then((data: { url?: string; code?: string } | null) => {
+          if (data?.url) window.location.href = data.url;
+          else if (data?.code) window.location.href = `/auth/callback?code=${data.code}`;
+        })
+        .catch(() => {});
+    }
   }, []);
 
   function switchMode(m: Mode) { setMode(m); setError(''); setSent(false); }
