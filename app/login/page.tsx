@@ -65,6 +65,17 @@ export default function LoginPage() {
     window.location.href = '/';
   }
 
+  // ── Google OAuth ───────────────────────────────────────────────────────
+  async function signInWithGoogle() {
+    setLoading(true); setError('');
+    const supabase = createClient();
+    const { error: err } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (err) { setError(err.message); setLoading(false); }
+  }
+
   // ── Magic link (backup) ────────────────────────────────────────────────
   async function sendMagicLink(e: React.FormEvent) {
     e.preventDefault();
@@ -171,6 +182,33 @@ export default function LoginPage() {
                   {loading ? 'Signing in…' : 'Sign in'}
                 </button>
               </form>
+
+              {/* ── OR divider ── */}
+              <div style={{ display:'flex', alignItems:'center', gap:10, margin:'18px 0 14px' }}>
+                <div style={{ flex:1, height:1, background:'rgba(255,255,255,.08)' }}/>
+                <span style={{ fontSize:11, color:'#6b7e94', textTransform:'uppercase', letterSpacing:'.06em' }}>or</span>
+                <div style={{ flex:1, height:1, background:'rgba(255,255,255,.08)' }}/>
+              </div>
+
+              {/* ── Google sign-in button ── */}
+              <button
+                type="button"
+                disabled={loading}
+                onClick={signInWithGoogle}
+                style={{
+                  width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+                  padding:'11px 0', borderRadius:12, border:'1px solid rgba(255,255,255,.12)',
+                  background:'rgba(255,255,255,.06)', color:'#e8eef7', fontSize:14, fontWeight:600,
+                  cursor: loading ? 'not-allowed' : 'pointer', fontFamily:'inherit',
+                  opacity: loading ? .7 : 1, transition:'background .15s',
+                }}
+                onMouseOver={e => (e.currentTarget.style.background='rgba(255,255,255,.11)')}
+                onMouseOut={e => (e.currentTarget.style.background='rgba(255,255,255,.06)')}
+              >
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" style={{ width:18, height:18 }}/>
+                Sign in with Google
+              </button>
+
               <div style={{ marginTop: 18, textAlign: 'center', borderTop: '1px solid rgba(255,255,255,.07)', paddingTop: 16 }}>
                 <button type="button" style={{ ...linkBtn, opacity: .75 }} onClick={() => switchMode('magic-link')}>
                   Use email magic link instead
