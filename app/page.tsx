@@ -2127,14 +2127,18 @@ function ProcurementImportPanel({ onImport, onClose, activeTeamMembers, authUser
                           <span className="small" style={{ textTransform:'capitalize' }}>{m.confidence}</span>
                         </td>
                         <td>
-                          <select
-                            className="hist-select"
-                            style={{ width:'100%' }}
-                            value={columnMap[m.sourceColumn] ?? ''}
-                            onChange={e => setColumnMap(prev => ({ ...prev, [m.sourceColumn]: e.target.value || null }))}
-                          >
-                            {TARGET_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-                          </select>
+                          {netsuiteDetected && columnMap[m.sourceColumn] === null ? (
+                            <span className="small" style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>Notes / Description</span>
+                          ) : (
+                            <select
+                              className="hist-select"
+                              style={{ width:'100%' }}
+                              value={columnMap[m.sourceColumn] ?? ''}
+                              onChange={e => setColumnMap(prev => ({ ...prev, [m.sourceColumn]: e.target.value || null }))}
+                            >
+                              {TARGET_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                            </select>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -3011,10 +3015,10 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
     });
 
     // Flatten groups into a merged list; multi-row groups become one record.
-    const mergedMapped: Array<{ m: MappedRecord<ProcurementRecord>; i: number; mergeSummary: string | null }> = [];
+    const mergedMapped: Array<{ m: MappedRecord<ProcurementRecord>; i: number; mergeSummary: string | null; allMembers: MappedRecord<ProcurementRecord>[] }> = [];
     for (const { members, indices } of groupMap.values()) {
       if (members.length === 1) {
-        mergedMapped.push({ m: members[0], i: indices[0], mergeSummary: null });
+        mergedMapped.push({ m: members[0], i: indices[0], mergeSummary: null, allMembers: members });
       } else {
         // Merge: use first member as base, sum amounts, collect item names.
         const base = members[0];
@@ -3049,11 +3053,11 @@ function ProcurementPage({ timeFilter, activeTeamMembers, authUserEmail, authUse
           // mark as needs_review if any member needs review
           status: members.some(mr => mr.status === 'needs_review') ? 'needs_review' : base.status,
         };
-        mergedMapped.push({ m: merged, i: indices[0], mergeSummary });
+        mergedMapped.push({ m: merged, i: indices[0], mergeSummary, allMembers: members });
       }
     }
 
-    for (const { m, i, mergeSummary } of mergedMapped) {
+    for (const { m, i, mergeSummary, allMembers } of mergedMapped) {
       const finalEmployeeId   = m.data.employeeId   ?? authUserEmail ?? '';
       const finalEmployeeName = m.data.employeeName ?? defaultEmployee?.name ?? 'Operations Team';
       const needsReview       = m.status === 'needs_review';
@@ -3122,6 +3126,23 @@ const normalizedDate =
         createdBy:        authUserEmail ?? undefined,
       };
 
+      // Derive status from total Quantity Remaining across all group rows.
+      // Requirement: Remaining = 0 → PO Arrived; any remaining → PO Issued.
+      // Only applies when the field is present in the import file.
+      {
+        const hasQtyField = allMembers.some(mr => {
+          const v = mr.rawData['Quantity Remaining'];
+          return v !== null && v !== undefined && String(v).trim() !== '';
+        });
+        if (hasQtyField) {
+          const totalRemaining = allMembers.reduce((sum, mr) => {
+            const n = parseFloat(String(mr.rawData['Quantity Remaining'] ?? '').replace(/[^0-9.]/g, ''));
+            return sum + (isNaN(n) ? 0 : n);
+          }, 0);
+          record.status = totalRemaining === 0 ? 'PO Arrived' : 'PO Issued';
+        }
+      }
+
       const supabase = createClient();
         const activityDate = record.date && /^\d{4}-\d{2}-\d{2}$/.test(record.date)
           ? record.date
@@ -3134,8 +3155,9 @@ const normalizedDate =
           const { data: existingRow } = await supabase
             .from('procurement_records')
             .select('*')
-            .eq('po_number', record.poNumber.trim())
+            .ilike('po_number', record.poNumber.trim())
             .is('deleted_at', null)
+            .or(`company_id.eq.${procCompanyId!},company_id.is.null`)
             .maybeSingle();
           if (existingRow) existingRecord = rowToProcurementRecord(existingRow);
         }
@@ -3171,9 +3193,10 @@ const normalizedDate =
                 ? patch.exchangeRateDate
                 : new Date().toISOString().slice(0, 10),
               raw_import:         rawImport,
+              company_id:         procCompanyId!,
             })
             .eq('id', existingRecord.id)
-            .eq('company_id', procCompanyId!);
+            .or(`company_id.eq.${procCompanyId!},company_id.is.null`);
 
           if (updErr) {
             console.error(`import upsert update [${record.poNumber}]:`, updErr.message);

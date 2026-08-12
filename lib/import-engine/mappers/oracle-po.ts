@@ -154,6 +154,15 @@ export function isNetSuiteExport(headers: string[]): boolean {
   return NETSUITE_REQUIRED_HEADERS.every(h => set.has(normalizeHeader(h)));
 }
 
+/** Normalize a date string to YYYY-MM-DD; returns the original value unchanged if unparseable. */
+function normalizeDateValue(raw: string): string {
+  const iso = raw.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2,'0')}-${iso[3].padStart(2,'0')}`;
+  const mdy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`;
+  return raw;
+}
+
 /** NetSuite-specific columns that are preserved in notes even without a target field. */
 const NETSUITE_PRESERVED_COLUMNS: { key: string; label: string }[] = [
   { key: 'Internal ID',                 label: 'Internal ID'           },
@@ -236,9 +245,11 @@ export function mapOraclePORow(
     .filter(({ key }) => key !== 'Quantity')
     .map(({ key, label }) => {
       const val = raw[key];
-      return val !== null && val !== undefined && String(val).trim()
-        ? `${label}: ${String(val).trim()}`
-        : null;
+      if (val === null || val === undefined || !String(val).trim()) return null;
+      const strVal = String(val).trim();
+      // Normalize ETA to YYYY-MM-DD so the render-time regex always matches
+      const formatted = key === 'Expected Receipt Date' ? normalizeDateValue(strVal) : strVal;
+      return `${label}: ${formatted}`;
     })
     .filter(Boolean) as string[];
 
@@ -247,6 +258,11 @@ export function mapOraclePORow(
   if (itemLines.length > 0)     noteParts.push(itemLines.join('\n'));
   if (preservedLines.length > 0) noteParts.push(preservedLines.join(' · '));
   if (noteParts.length > 0)     data.notes = noteParts.join('\n');
+
+  // Normalize PO number: strip unicode whitespace, uppercase for consistent DB lookup
+  if (typeof data.poNumber === 'string') {
+    data.poNumber = normalizeHeader(data.poNumber).trim().toUpperCase();
+  }
 
   // Apply defaults for missing optional fields
   if (!data.category)  data.category  = 'PO Created';
