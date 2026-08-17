@@ -9,7 +9,10 @@ export async function proxy(request: NextRequest) {
   const isPublic =
     pathname.startsWith('/login') ||
     pathname.startsWith('/auth') ||
-    pathname.startsWith('/access-denied');
+    pathname.startsWith('/access-denied') ||
+    pathname === '/api/procurement/auto-import' ||
+    pathname === '/api/procurement/gmail-fetch' ||
+    pathname === '/api/procurement/resend-inbound';
 
   let supabaseResponse = NextResponse.next({ request });
 
