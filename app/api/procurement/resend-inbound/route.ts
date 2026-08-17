@@ -94,9 +94,9 @@ export async function POST(request: NextRequest) {
   const rawBody = await request.text();
 
   // ── Verify signature ──
-  const webhookId        = request.headers.get('webhook-id')        ?? '';
-  const webhookTimestamp = request.headers.get('webhook-timestamp')  ?? '';
-  const webhookSignature = request.headers.get('webhook-signature')  ?? '';
+  const webhookId        = request.headers.get('svix-id')        ?? '';
+  const webhookTimestamp = request.headers.get('svix-timestamp')  ?? '';
+  const webhookSignature = request.headers.get('svix-signature')  ?? '';
 
   if (!webhookId || !webhookTimestamp || !webhookSignature) {
     return NextResponse.json({ error: 'missing_signature_headers' }, { status: 400 });
