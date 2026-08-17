@@ -130,9 +130,14 @@ export async function POST(request: NextRequest) {
   // ── Validate recipient ──
   const procEmail = process.env.PROCUREMENT_EMAIL_ADDRESS;
   if (procEmail) {
-    const addressed = (data.received_for ?? []).some(
-      addr => addr.toLowerCase() === procEmail.toLowerCase(),
-    );
+    const addressed = (data.received_for ?? []).some(addr => {
+      // Strip mailto markdown: [email](mailto:email)
+      const fromMarkdown = addr.match(/\[.*?\]\(mailto:([^)]+)\)/)?.[1];
+      // Strip angle brackets: Name <email>
+      const fromAngle = addr.match(/<([^>]+)>/)?.[1];
+      const bare = (fromMarkdown ?? fromAngle ?? addr).trim();
+      return bare.toLowerCase() === procEmail.toLowerCase();
+    });
     if (!addressed) {
       return NextResponse.json({ skipped: true, reason: 'wrong_recipient' });
     }
