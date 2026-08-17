@@ -99,7 +99,13 @@ export async function POST(request: NextRequest) {
   const webhookSignature = request.headers.get('svix-signature')  ?? '';
 
   if (!webhookId || !webhookTimestamp || !webhookSignature) {
-    return NextResponse.json({ error: 'missing_signature_headers' }, { status: 400 });
+    const sigHeaderNames = [...request.headers.keys()].filter(k =>
+      k.includes('svix') || k.includes('webhook') || k.includes('signature')
+    );
+    return NextResponse.json(
+      { error: 'missing_signature_headers', present_sig_headers: sigHeaderNames },
+      { status: 400 },
+    );
   }
 
   if (!verifySignature(rawBody, { id: webhookId, timestamp: webhookTimestamp, signature: webhookSignature }, webhookSecret)) {
